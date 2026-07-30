@@ -1,0 +1,13 @@
+{
+  "name": "aurora-zero-discord-runner",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/runner.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "discord.js": "^14.22.1",
+    "dotenv": "^16.6.1"
+  }
+}
