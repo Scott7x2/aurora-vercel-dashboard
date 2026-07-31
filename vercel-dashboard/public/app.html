@@ -20,14 +20,21 @@
           <div><strong id="botName">Sem bot</strong><small id="botState">Configure uma instancia</small></div>
         </div>
         <nav>
-          <button class="active" data-tab="bot">Bot</button>
+          <button class="active" data-tab="central">Painel</button>
+          <button data-tab="sales">Minha loja</button>
+          <button data-tab="tickets">Ticket</button>
+          <button data-tab="auth">Boas-Vindas</button>
+          <button data-tab="automations">Automacoes</button>
+          <button data-tab="identity">Customizar</button>
+          <button data-tab="cloud">AuroraCloud</button>
+          <button data-tab="statement">Extrato</button>
+          <button data-tab="giveaway">Giveaway</button>
+          <button data-tab="settings">Configuracoes</button>
+          <button data-tab="protect">AuroraProtect</button>
+          <button data-tab="bot">Bot 24h</button>
           <button data-tab="saved">Bots salvos</button>
-          <button data-tab="auth">Autenticacao</button>
-          <button data-tab="tickets">Tickets</button>
-          <button data-tab="sales">Vendas</button>
           <button data-tab="postpurchase">Pos-compra</button>
           <button data-tab="logs">Logs</button>
-          <button data-tab="identity">Identidade</button>
           <button data-tab="variables">Variaveis</button>
         </nav>
         <a href="/logout">Sair</a>
@@ -42,7 +49,29 @@
         </header>
         <div id="notice"></div>
 
-        <section id="tab-bot" class="tab active">
+        <section id="tab-central" class="tab active">
+          <div class="control-hero">
+            <div>
+              <h2>Painel de Controle</h2>
+              <p>Gerencie sua loja, tickets, boas-vindas, automacoes, protecoes e personalizacao pelo site.</p>
+              <span class="hero-pill">Aurora Sales</span>
+            </div>
+          </div>
+          <div class="control-grid">
+            <button type="button" data-jump-tab="sales">🏬 Minha loja</button>
+            <button type="button" data-jump-tab="tickets">🎧 Ticket</button>
+            <button type="button" data-jump-tab="auth">📋 Boas-Vindas</button>
+            <button type="button" data-jump-tab="automations">🔄 Automacoes</button>
+            <button type="button" data-jump-tab="identity">🎨 Customizar</button>
+            <button type="button" data-jump-tab="cloud">☁️ AuroraCloud</button>
+            <button type="button" data-jump-tab="statement">🧾 Extrato</button>
+            <button type="button" data-jump-tab="giveaway">🎉 Giveaway</button>
+            <button type="button" data-jump-tab="settings">⚙️ Configuracoes</button>
+            <button type="button" data-jump-tab="protect">🛡️ AuroraProtect</button>
+          </div>
+        </section>
+
+        <section id="tab-bot" class="tab">
           <div class="head">
             <div><h2>Bot separado por servidor</h2><p>Ao salvar um token valido, o bot e ativado automaticamente. A central 24h hospedada por voce inicia essa instancia em poucos segundos.</p></div>
             <label class="switch"><input id="enabled" type="checkbox"><span></span></label>
@@ -287,6 +316,67 @@
             <button type="button" data-log-filter="sistema">Sistema</button>
           </div>
           <div id="logsList" class="logs-list"></div>
+        </section>
+
+        <section id="tab-automations" class="tab">
+          <div class="head"><div><h2>Automacoes</h2><p>Acoes automaticas para manter seguranca, ordem e operacao da loja.</p></div></div>
+          <div class="module-grid">
+            <div class="module-card"><h3>⚡ Repostagem</h3><p>Republique painéis em intervalos definidos.</p><span>Em preparacao</span></div>
+            <div class="module-card"><h3>💬 Mensagens auto</h3><p>Mensagens automaticas com variaveis e horarios.</p><span>Em preparacao</span></div>
+            <div class="module-card"><h3>✨ Limpeza</h3><p>Limpeza automatica de mensagens e canais.</p><span>Em preparacao</span></div>
+            <div class="module-card"><h3>💚 Monitorar feedbacks</h3><p>Acompanhe avaliacoes e respostas dos compradores.</p><span>Integrado aos logs</span></div>
+            <div class="module-card"><h3># Lock-Unlock</h3><p>Trave e destrave canais rapidamente.</p><span>Em preparacao</span></div>
+            <div class="module-card"><h3>👥 Invite Tracker</h3><p>Rastreie convites e crescimento do servidor.</p><span>Em preparacao</span></div>
+            <div class="module-card"><h3>🔔 Alerta de Restock</h3><p>Avise quando produto voltar ao estoque.</p><span>Em preparacao</span></div>
+          </div>
+        </section>
+
+        <section id="tab-cloud" class="tab">
+          <div class="head"><div><h2>AuroraCloud</h2><p>Infraestrutura em nuvem para sincronizacao e recuperacao.</p></div></div>
+          <div class="setting-card">
+            <h3>☁️ Status da nuvem</h3>
+            <p class="muted">O Supabase ja guarda bots, configuracoes, produtos, carrinhos, pedidos e logs. Backup automatico visual sera adicionado depois.</p>
+            <div class="module-grid compact">
+              <div class="module-card"><h3>Aplicacao OAuth2</h3><span>Conectada pelo Discord Login</span></div>
+              <div class="module-card"><h3>Membros sincronizados</h3><span>Via runner 24h</span></div>
+              <div class="module-card"><h3>Backup automatico</h3><span>Em breve</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-statement" class="tab">
+          <div class="head"><div><h2>Extrato de vendas</h2><p>Resumo rapido de carrinhos, Pix gerados, compras aprovadas e avaliacoes.</p></div></div>
+          <div class="module-grid">
+            <div class="module-card"><h3>📅 Hoje</h3><p>Use a aba Logs filtrando Vendas para ver pedidos de hoje.</p><span>Logs ativos</span></div>
+            <div class="module-card"><h3>📆 7 dias</h3><p>Relatorio grafico sera construido usando payment_orders.</p><span>Em preparacao</span></div>
+            <div class="module-card"><h3>💰 Total</h3><p>Total acumulado por compras aprovadas.</p><span>Em preparacao</span></div>
+          </div>
+        </section>
+
+        <section id="tab-giveaway" class="tab">
+          <div class="head"><div><h2>Giveaway</h2><p>Gerencie sorteios do servidor de forma intuitiva.</p></div></div>
+          <div class="module-grid">
+            <div class="module-card"><h3>🚀 Realizar sorteio</h3><p>Formulario de sorteio com premio, tempo e ganhadores.</p><span>Em preparacao</span></div>
+            <div class="module-card"><h3>⚙️ Gerenciar sorteios</h3><p>Lista de sorteios ativos e encerrados.</p><span>Em preparacao</span></div>
+          </div>
+        </section>
+
+        <section id="tab-settings" class="tab">
+          <div class="head"><div><h2>Configuracoes</h2><p>Configure cargos, canais, banco e bases do servidor.</p></div></div>
+          <div class="module-grid">
+            <div class="module-card"><h3>@ Cargos</h3><p>Atualize em Bot 24h e escolha nas abas Boas-vindas/Ticket.</p><span>Ativo</span></div>
+            <div class="module-card"><h3># Canais</h3><p>Atualize em Bot 24h e selecione nos formulários.</p><span>Ativo</span></div>
+            <div class="module-card"><h3>💳 Setar meu banco</h3><p>Use Minha loja → Pagamento para Pix automatico.</p><span>Ativo</span></div>
+          </div>
+        </section>
+
+        <section id="tab-protect" class="tab">
+          <div class="head"><div><h2>AuroraProtect</h2><p>Protecoes de moderacao e anti-raid.</p></div></div>
+          <div class="module-grid">
+            <div class="module-card"><h3>🛡️ Moderacao</h3><p>Protecoes de moderacao do servidor.</p><span>Em preparacao</span></div>
+            <div class="module-card"><h3>🔨 Sistema Anti-Raid</h3><p>Detecte entrada suspeita e ações em massa.</p><span>Em preparacao</span></div>
+            <div class="module-card"><h3>🚫 Anti-Fake</h3><p>Bloqueio por idade de conta e comportamento.</p><span>Em preparacao</span></div>
+          </div>
         </section>
 
         <section id="tab-identity" class="tab">

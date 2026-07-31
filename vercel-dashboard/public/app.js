@@ -613,12 +613,21 @@ async function uploadEmoji() {
 }
 
 function bind() {
-  document.querySelectorAll('nav button').forEach((button) => button.onclick = () => {
+  const openTab = (tab) => {
+    const button = document.querySelector(`nav button[data-tab="${tab}"]`);
+    const section = $(`tab-${tab}`);
+    if (!button || !section) return;
     document.querySelectorAll('nav button').forEach((item) => item.classList.remove('active'));
     document.querySelectorAll('.tab').forEach((item) => item.classList.remove('active'));
     button.classList.add('active');
-    $(`tab-${button.dataset.tab}`).classList.add('active');
+    section.classList.add('active');
     $('crumb').textContent = button.textContent;
+  };
+  document.querySelectorAll('nav button').forEach((button) => button.onclick = () => {
+    openTab(button.dataset.tab);
+  });
+  document.querySelectorAll('[data-jump-tab]').forEach((button) => {
+    button.onclick = () => openTab(button.dataset.jumpTab);
   });
   $('guildSelect').onchange = (event) => selectGuild(event.target.value).catch((error) => msg(error.message, true));
   $('saveInstance').onclick = () => saveInstance().catch((error) => msg(error.message, true));

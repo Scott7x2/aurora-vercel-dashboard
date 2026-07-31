@@ -484,7 +484,8 @@ function cartComponents(settings, items) {
   });
   rows.push(row(
     btn('az:cart_confirm', 'Confirmar compra', ButtonStyle.Success, '✅'),
-    btn('az:cart_clear', 'Limpar carrinho', ButtonStyle.Danger, settings.button_emoji)
+    btn('az:cart_clear', 'Limpar carrinho', ButtonStyle.Secondary, settings.button_emoji),
+    btn('az:cart_close', 'Fechar carrinho', ButtonStyle.Danger)
   ));
   return rows;
 }
@@ -572,7 +573,11 @@ async function addProductToCart(interaction, instance, productId, variantIndex =
     channelId: thread.id,
     category: 'vendas'
   });
-  return safeEphemeral(interaction, `Adicionado ao carrinho: ${thread}`);
+  const link = `https://discord.com/channels/${interaction.guildId}/${thread.id}`;
+  return safeEphemeral(interaction, {
+    content: `✅ Seu carrinho foi atualizado: ${thread}`,
+    components: [row(new ButtonBuilder().setLabel('Ir para o carrinho').setStyle(ButtonStyle.Link).setURL(link))]
+  });
 }
 
 async function ticketForThread(instance, threadId) {
@@ -621,7 +626,8 @@ async function confirmCart(interaction, instance) {
     embeds: [embed(settings, '📜 Termos da compra', `${terms}\n\n**Resumo:**\n${cartLines(items)}\n\n**Total:** ${formatBRL(total)}\n\nClique em **Aceitar termos e gerar Pix** para continuar.`, settings.sales_color)],
     components: [row(
       btn('az:terms_accept', 'Aceitar termos e gerar Pix', ButtonStyle.Success, '✅'),
-      btn('az:cart_clear', 'Cancelar compra', ButtonStyle.Danger)
+      btn('az:cart_clear', 'Limpar carrinho', ButtonStyle.Secondary),
+      btn('az:cart_close', 'Fechar carrinho', ButtonStyle.Danger)
     )]
   };
   let message = ticket.terms_message_id ? await interaction.channel.messages.fetch(ticket.terms_message_id).catch(() => null) : null;
@@ -687,7 +693,7 @@ async function generateCartPayment(interaction, instance) {
     embeds: [embed(
       settings,
       '💠 Pix gerado automaticamente',
-      `**Pedido:** ${order.id}\n**Total:** ${formatBRL(total)}\n\nEscaneie o QR Code ou copie o Pix abaixo:\n\n\`\`\`${payload}\`\`\`\n\nDepois de pagar, envie o comprovante aqui. O suporte pode clicar em **Aprovar compra**.`,
+      `**Pedido:** ${order.id}\n**Total:** ${formatBRL(total)}\n\n${payment?.public_instructions ? `${payment.public_instructions}\n\n` : ''}Escaneie o QR Code ou copie o Pix abaixo:\n\n\`\`\`${payload}\`\`\`\n\nDepois de pagar, envie o comprovante aqui. O suporte pode clicar em **Aprovar compra**.`,
       settings.sales_color
     ).setImage('attachment://pix-aurora.png')],
     files: [file],
@@ -815,6 +821,45 @@ async function panel(instanceId, type, context = {}) {
     context,
     components: rows
   });
+}
+
+function productCard(settings, item, context = {}) {
+  const variations = variationsOf(item);
+  const price = item.product_type === 'variation'
+    ? (variations[0]?.price || item.price || 'R$ 0,00')
+    : (item.price || 'R$ 0,00');
+  const stockText = item.stock === null || item.stock === undefined ? 'Ilimitado' : String(item.stock);
+  const description = [
+    item.delivery_content ? '⚡ **Entrega Automática!**' : '',
+    item.description || 'Produto disponivel para compra.',
+    '',
+    `**Valor à vista**\n\`${price}\``,
+    `**Restam**\n\`${stockText}\``
+  ].filter(Boolean).join('\n');
+  const card = embed(settings, renderTemplate(item.name, { ...context, product: item }), renderTemplate(description, { ...context, product: item }), settings.sales_color);
+  if (/^https?:\/\//i.test(String(item.image_url || ''))) card.setImage(item.image_url);
+  return {
+    embeds: [card],
+    components: [row(btn(`az:buy:${item.id}`, '🛒 Comprar', ButtonStyle.Success, settings.button_emoji))]
+  };
+}
+
+async function publishSalesPanel(instance, channel, context = {}) {
+  const settings = await getSettings(instance.id);
+  const items = await products(instance.id);
+  await channel.send(messagePayload(settings, {
+    mode: settings.sales_mode,
+    color: settings.sales_color,
+    title: settings.sales_title || 'Minha loja',
+    description: items.length
+      ? settings.sales_message || 'Escolha um produto abaixo para abrir seu carrinho.'
+      : `${settings.sales_message || 'Escolha um produto abaixo para abrir seu carrinho.'}\n\nNenhum produto ativo cadastrado ainda.`,
+    context: { ...context, settings, channel },
+    components: []
+  }));
+  for (const item of items.slice(0, 20)) {
+    await channel.send(productCard(settings, item, { ...context, settings, channel }));
+  }
 }
 
 async function addTicketMembers(thread, interaction, settings) {
@@ -1046,8 +1091,8 @@ async function closeTicket(interaction, instance) {
     actorId: interaction.user.id,
     channelId: interaction.channel.id
   });
-  await interaction.reply('Ticket fechado.');
-  setTimeout(() => interaction.channel.setArchived(true).catch(() => null), 2500);
+  await interaction.reply('Fechado. Este tópico será arquivado em 5 segundos.');
+  setTimeout(() => interaction.channel.setArchived(true).catch(() => null), 5000);
 }
 
 async function handle(interaction, instance) {
@@ -1060,6 +1105,10 @@ async function handle(interaction, instance) {
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: 'Voce precisa de Gerenciar Servidor.', ephemeral: true });
     const type = interaction.options.getString('tipo', true);
     const channel = interaction.options.getChannel('canal', true);
+    if (type === 'sales') {
+      await publishSalesPanel(instance, channel, { interaction, channel });
+      return interaction.reply({ content: `Vitrine e produtos publicados em ${channel}.`, ephemeral: true });
+    }
     const payload = await panel(instance.id, type, { interaction, channel });
     await channel.send(payload);
     return interaction.reply({ content: `Painel publicado em ${channel}.`, ephemeral: true });
@@ -1091,6 +1140,7 @@ async function handle(interaction, instance) {
   if (action === 'cart_plus') return changeCartQuantity(interaction, instance, Number(value), 1);
   if (action === 'cart_minus') return changeCartQuantity(interaction, instance, Number(value), -1);
   if (action === 'cart_clear') return clearCart(interaction, instance);
+  if (action === 'cart_close') return closeTicket(interaction, instance);
   if (action === 'cart_confirm') return confirmCart(interaction, instance);
   if (action === 'terms_accept') return generateCartPayment(interaction, instance);
   if (action === 'approve') return approvePurchase(interaction, instance);
