@@ -144,13 +144,17 @@ function hasManageGuild(guild) {
   }
 }
 
-function botInviteUrl(clientId) {
+function botInviteUrl(clientId, guildId = null) {
   if (!clientId) return null;
   const params = new URLSearchParams({
     client_id: clientId,
     permissions: botPermissions.toString(),
     scope: 'bot applications.commands'
   });
+  if (guildId) {
+    params.set('guild_id', guildId);
+    params.set('disable_guild_select', 'true');
+  }
   return `https://discord.com/oauth2/authorize?${params.toString()}`;
 }
 
@@ -165,7 +169,7 @@ function publicInstance(instance) {
     enabled: instance.enabled,
     last_seen_at: instance.last_seen_at,
     last_error: instance.last_error,
-    invite_url: botInviteUrl(instance.bot_client_id)
+    invite_url: botInviteUrl(instance.bot_client_id, instance.guild_id)
   };
 }
 

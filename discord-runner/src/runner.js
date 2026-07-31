@@ -289,52 +289,81 @@ async function handle(interaction, instance) {
 
 async function start(instance) {
   if (running.has(instance.id)) return;
-  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
-  client.once(Events.ClientReady, async () => {
-    console.log(`[${runnerName}] Online: ${client.user.tag} / ${instance.guild_name}`);
-    await sync(instance, client).catch((error) => setError(instance.id, error.message));
-  });
-  client.on(Events.Error, (error) => {
-    console.error(`[${runnerName}] Discord client error (${instance.bot_name || instance.id}):`, error);
-    setError(instance.id, error.message).catch(console.error);
-  });
-  client.on(Events.Warn, (warning) => console.warn(`[${runnerName}] Discord warning (${instance.bot_name || instance.id}):`, warning));
-  client.on(Events.GuildCreate, () => sync(instance, client).catch((error) => setError(instance.id, error.message)));
-  client.on(Events.GuildMemberAdd, async (member) => {
-    if (member.guild.id !== instance.guild_id) return;
-    const settings = await getSettings(instance.id);
-    if (settings.auto_role_id) await member.roles.add(settings.auto_role_id).catch(() => null);
-    if (!settings.welcome_channel_id) return;
-    const channel = await member.guild.channels.fetch(settings.welcome_channel_id).catch(() => null);
-    if (!channel?.isTextBased?.()) return;
-    await channel.send({
-      embeds: [embed(
-        settings,
-        renderTemplate(settings.welcome_title, { member, settings, channel }),
-        renderTemplate(settings.welcome_message, { member, settings, channel })
-      )]
-    }).catch(() => null);
-  });
-  client.on(Events.InteractionCreate, async (interaction) => {
-    try {
-      await handle(interaction, instance);
-    } catch (error) {
-      console.error(error);
-      if (interaction.isRepliable()) {
-        const body = { content: 'Erro ao executar acao. Confira permissoes do bot.', ephemeral: true };
-        if (interaction.deferred || interaction.replied) await interaction.followUp(body).catch(() => null);
-        else await interaction.reply(body).catch(() => null);
-      }
+
+  const buildClient = (withMembersIntent = true) => {
+    const intents = withMembersIntent
+      ? [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
+      : [GatewayIntentBits.Guilds];
+    const client = new Client({ intents });
+
+    client.once(Events.ClientReady, async () => {
+      const mode = withMembersIntent ? 'com members intent' : 'modo basico sem members intent';
+      console.log(`[${runnerName}] Online: ${client.user.tag} / ${instance.guild_name} (${mode})`);
+      await sync(instance, client).catch((error) => setError(instance.id, error.message));
+    });
+
+    client.on(Events.Error, (error) => {
+      console.error(`[${runnerName}] Discord client error (${instance.bot_name || instance.id}):`, error);
+      setError(instance.id, error.message).catch(console.error);
+    });
+    client.on(Events.Warn, (warning) => console.warn(`[${runnerName}] Discord warning (${instance.bot_name || instance.id}):`, warning));
+    client.on(Events.GuildCreate, () => sync(instance, client).catch((error) => setError(instance.id, error.message)));
+
+    if (withMembersIntent) {
+      client.on(Events.GuildMemberAdd, async (member) => {
+        if (member.guild.id !== instance.guild_id) return;
+        const settings = await getSettings(instance.id);
+        if (settings.auto_role_id) await member.roles.add(settings.auto_role_id).catch(() => null);
+        if (!settings.welcome_channel_id) return;
+        const channel = await member.guild.channels.fetch(settings.welcome_channel_id).catch(() => null);
+        if (!channel?.isTextBased?.()) return;
+        await channel.send({
+          embeds: [embed(
+            settings,
+            renderTemplate(settings.welcome_title, { member, settings, channel }),
+            renderTemplate(settings.welcome_message, { member, settings, channel })
+          )]
+        }).catch(() => null);
+      });
     }
-  });
+
+    client.on(Events.InteractionCreate, async (interaction) => {
+      try {
+        await handle(interaction, instance);
+      } catch (error) {
+        console.error(error);
+        if (interaction.isRepliable()) {
+          const body = { content: 'Erro ao executar acao. Confira permissoes do bot.', ephemeral: true };
+          if (interaction.deferred || interaction.replied) await interaction.followUp(body).catch(() => null);
+          else await interaction.reply(body).catch(() => null);
+        }
+      }
+    });
+
+    return client;
+  };
+
+  let client = buildClient(true);
   try {
     await client.login(decrypt(instance.token_encrypted));
     running.set(instance.id, client);
   } catch (error) {
+    if (/disallowed intents/i.test(error.message || '')) {
+      client.destroy();
+      console.warn(`[${runnerName}] ${instance.bot_name || instance.guild_name} sem Server Members Intent. Iniciando em modo basico.`);
+      client = buildClient(false);
+      try {
+        await client.login(decrypt(instance.token_encrypted));
+        running.set(instance.id, client);
+        return;
+      } catch (fallbackError) {
+        await setError(instance.id, fallbackError.message);
+        return;
+      }
+    }
     await setError(instance.id, error.message);
   }
 }
-
 async function stop(id) {
   const client = running.get(id);
   if (!client) return;

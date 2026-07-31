@@ -89,6 +89,8 @@ function mergeSavedInstance(instance) {
   if (instanceIndex >= 0) state.instances[instanceIndex] = instance;
   else state.instances.unshift(instance);
 
+  if (state.instance?.id === instance.id) state.instance = instance;
+
   let guild = state.guilds.find((item) => item.id === instance.guild_id);
   if (!guild) {
     guild = {
@@ -102,6 +104,10 @@ function mergeSavedInstance(instance) {
   } else {
     guild.instance = instance;
     guild.name = guild.name || instance.guild_name || instance.bot_name || 'Servidor salvo';
+  }
+  if (state.guild?.id === instance.guild_id) {
+    state.guild = guild;
+    state.guild.instance = instance;
   }
 }
 
@@ -226,6 +232,15 @@ async function loadInstances() {
   state.instances.forEach(mergeSavedInstance);
   renderGuilds();
   renderSavedBots();
+  header();
+}
+
+async function refreshStatus() {
+  try {
+    await loadInstances();
+  } catch (error) {
+    console.warn('Falha ao atualizar status dos bots:', error.message);
+  }
 }
 
 async function loadResources() {
@@ -352,6 +367,7 @@ async function init() {
     state.me = await api('/api/me');
     await loadGuilds();
     header();
+    setInterval(refreshStatus, 10000);
   } catch (error) {
     msg(error.message, true);
   }
