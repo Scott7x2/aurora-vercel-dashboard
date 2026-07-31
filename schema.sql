@@ -144,10 +144,12 @@ create table if not exists tickets (
   terms_message_id text,
   payment_message_id text,
   cart_total_text text,
+  controls_message_id text,
   purchase_status text not null default 'pending',
   approved_at timestamptz,
   rating integer,
   reviewed_at timestamptz,
+  last_staff_notification_at timestamptz,
   status text not null default 'open',
   created_at timestamptz not null default now(),
   closed_at timestamptz

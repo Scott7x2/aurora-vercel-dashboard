@@ -221,7 +221,9 @@ async function ensureRuntimeSchema() {
       add column if not exists cart_message_id text,
       add column if not exists terms_message_id text,
       add column if not exists payment_message_id text,
-      add column if not exists cart_total_text text
+      add column if not exists cart_total_text text,
+      add column if not exists controls_message_id text,
+      add column if not exists last_staff_notification_at timestamptz
   `);
   await query(`
     create table if not exists cart_items (
@@ -711,7 +713,8 @@ function cartComponents(settings, items) {
   rows.push(row(
     btn('az:cart_confirm', 'Confirmar compra', ButtonStyle.Success, '✅'),
     btn('az:cart_clear', 'Limpar carrinho', ButtonStyle.Secondary, settings.button_emoji),
-    btn('az:cart_close', 'Fechar carrinho', ButtonStyle.Danger)
+    btn('az:notify_staff', 'Notificar staff', ButtonStyle.Primary, '🔔'),
+    btn('az:cart_close', 'Fechar (staff)', ButtonStyle.Danger)
   ));
   return rows;
 }
@@ -853,7 +856,8 @@ async function confirmCart(interaction, instance) {
     components: [row(
       btn('az:terms_accept', 'Aceitar termos e gerar Pix', ButtonStyle.Success, '✅'),
       btn('az:cart_clear', 'Limpar carrinho', ButtonStyle.Secondary),
-      btn('az:cart_close', 'Fechar carrinho', ButtonStyle.Danger)
+      btn('az:notify_staff', 'Notificar staff', ButtonStyle.Primary, '🔔'),
+      btn('az:cart_close', 'Fechar (staff)', ButtonStyle.Danger)
     )]
   };
   let message = ticket.terms_message_id ? await interaction.channel.messages.fetch(ticket.terms_message_id).catch(() => null) : null;
@@ -923,7 +927,11 @@ async function generateCartPayment(interaction, instance) {
       settings.sales_color
     ).setImage('attachment://pix-aurora.png')],
     files: [file],
-    components: [row(btn('az:approve', 'Aprovar compra', ButtonStyle.Success, '✅'), btn('az:close', 'Fechar carrinho', ButtonStyle.Danger))]
+    components: [row(
+      btn('az:approve', 'Aprovar compra', ButtonStyle.Success, '✅'),
+      btn('az:notify_staff', 'Notificar staff', ButtonStyle.Primary, '🔔'),
+      btn('az:close', 'Fechar (staff)', ButtonStyle.Danger)
+    )]
   });
   await query(`
     update tickets
@@ -1168,7 +1176,7 @@ async function openTicket(interaction, instance, productId = null, variantIndex 
   const openMessage = item
     ? (settings.ticket_open_purchase_message || `ID do pedido: **${order?.id || 'gerando'}**\nProduto: **{product}**\n${variant ? 'Variacao: **{variation}**\n' : ''}Preco: **${chosenPrice(item, variant)}**\n{productDescription}${variant?.description ? '\n{variationDescription}' : ''}\n\n${paymentText(payment)}\n\nAguarde o suporte aprovar sua compra.`)
     : (settings.ticket_open_message || 'Ola {user}, obrigado por abrir um ticket.\n\nExplique aqui o que voce precisa e aguarde o suporte. {supportRoleMentions}');
-  await thread.send({
+  const openingMessage = await thread.send({
     content: `${interaction.user} ${mentions}`.trim(),
     embeds: [embed(
       settings,
@@ -1177,9 +1185,17 @@ async function openTicket(interaction, instance, productId = null, variantIndex 
       settings.ticket_open_color || settings.ticket_color
     )],
     components: item
-      ? [row(btn('az:approve', 'Aprovar compra', ButtonStyle.Success, '✅'), btn('az:close', 'Fechar ticket', ButtonStyle.Danger, settings.button_emoji))]
-      : [row(btn('az:close', 'Fechar ticket', ButtonStyle.Danger, settings.button_emoji))]
+      ? [row(
+        btn('az:approve', 'Aprovar compra', ButtonStyle.Success, '✅'),
+        btn('az:notify_staff', 'Notificar staff', ButtonStyle.Primary, '🔔'),
+        btn('az:close', 'Fechar (staff)', ButtonStyle.Danger, settings.button_emoji)
+      )]
+      : [row(
+        btn('az:notify_staff', 'Notificar staff', ButtonStyle.Primary, '🔔'),
+        btn('az:close', 'Fechar (staff)', ButtonStyle.Danger, settings.button_emoji)
+      )]
   });
+  await query('update tickets set controls_message_id=$1 where thread_id=$2 and bot_instance_id=$3', [openingMessage.id, thread.id, instance.id]);
   await logEvent(instance, settings, item ? 'cart_created' : 'ticket_opened', item ? `Carrinho criado: ${item.name} por ${interaction.user.tag}` : `Ticket aberto por ${interaction.user.tag}`, {
     actorId: interaction.user.id,
     targetId: item?.id ? String(item.id) : null,
@@ -1190,10 +1206,41 @@ async function openTicket(interaction, instance, productId = null, variantIndex 
   return safeEphemeral(interaction, `Ticket criado: ${thread}`);
 }
 
-function isSupportOrManager(interaction, settings, ticket) {
+async function refreshOpenTicketControls(instance, client) {
+  const settings = await getSettings(instance.id);
+  const openTickets = await query(`
+    select * from tickets
+    where bot_instance_id=$1 and status='open'
+    order by created_at desc
+    limit 100
+  `, [instance.id]);
+  for (const ticket of openTickets) {
+    const thread = await client.channels.fetch(ticket.thread_id).catch(() => null);
+    if (!thread?.isThread?.() || thread.archived) continue;
+    const components = ticket.product_id
+      ? [row(
+        btn('az:approve', 'Aprovar compra', ButtonStyle.Success, '✅'),
+        btn('az:notify_staff', 'Notificar staff', ButtonStyle.Primary, '🔔'),
+        btn('az:close', 'Fechar (staff)', ButtonStyle.Danger, settings.button_emoji)
+      )]
+      : [row(
+        btn('az:notify_staff', 'Notificar staff', ButtonStyle.Primary, '🔔'),
+        btn('az:close', 'Fechar (staff)', ButtonStyle.Danger, settings.button_emoji)
+      )];
+    const existing = ticket.controls_message_id
+      ? await thread.messages.fetch(ticket.controls_message_id).catch(() => null)
+      : null;
+    if (existing) await existing.edit({ components }).catch(() => null);
+    else {
+      const message = await thread.send({ content: 'Controles do atendimento', components }).catch(() => null);
+      if (message) await query('update tickets set controls_message_id=$1 where thread_id=$2 and bot_instance_id=$3', [message.id, thread.id, instance.id]);
+    }
+  }
+}
+
+function isSupportStaff(interaction, settings) {
   const support = Array.isArray(settings.support_role_ids) ? settings.support_role_ids : [];
-  return ticket?.owner_id === interaction.user.id
-    || interaction.memberPermissions?.has(PermissionFlagsBits.ManageThreads)
+  return interaction.guild?.ownerId === interaction.user.id
     || support.some((roleId) => interaction.member?.roles?.cache?.has(roleId));
 }
 
@@ -1202,7 +1249,7 @@ async function approvePurchase(interaction, instance) {
   const settings = await getSettings(instance.id);
   const ticket = await one('select * from tickets where thread_id=$1 and bot_instance_id=$2', [interaction.channel.id, instance.id]);
   if (!ticket) return safeEphemeral(interaction, 'Compra nao encontrada.');
-  if (!isSupportOrManager(interaction, settings, ticket)) return safeEphemeral(interaction, 'Apenas suporte ou gerencia pode aprovar.');
+  if (!isSupportStaff(interaction, settings)) return safeEphemeral(interaction, 'Apenas o dono do servidor ou cargos de suporte configurados podem aprovar.');
   if (ticket.purchase_status === 'approved') return safeEphemeral(interaction, 'Essa compra ja foi aprovada.');
 
   const items = await cartItems(ticket.thread_id);
@@ -1305,13 +1352,47 @@ async function submitReview(interaction, instance, threadId, rating) {
   return interaction.reply({ content: `Obrigado pela avaliacao de ${stars} estrela(s)!`, ephemeral: true });
 }
 
+async function notifyStaff(interaction, instance) {
+  if (!interaction.channel?.isThread?.()) return safeEphemeral(interaction, 'Use dentro do seu ticket ou carrinho.');
+  const settings = await getSettings(instance.id);
+  const ticket = await ticketForThread(instance, interaction.channel.id);
+  if (!ticket) return safeEphemeral(interaction, 'Ticket nao encontrado.');
+  if (ticket.owner_id !== interaction.user.id) return safeEphemeral(interaction, 'Somente a pessoa que abriu este ticket pode notificar a staff.');
+  if (ticket.status === 'closed') return safeEphemeral(interaction, 'Este ticket ja esta fechado.');
+  const support = Array.isArray(settings.support_role_ids) ? settings.support_role_ids.filter(Boolean) : [];
+  if (!support.length) return safeEphemeral(interaction, 'O dono do bot ainda nao configurou cargos de suporte no painel.');
+
+  const cooldownMs = 5 * 60 * 1000;
+  const lastNotification = ticket.last_staff_notification_at ? new Date(ticket.last_staff_notification_at).getTime() : 0;
+  const remaining = cooldownMs - (Date.now() - lastNotification);
+  if (remaining > 0) {
+    const minutes = Math.max(1, Math.ceil(remaining / 60000));
+    return safeEphemeral(interaction, `A staff ja foi notificada. Aguarde ${minutes} minuto(s) para notificar novamente.`);
+  }
+
+  const mentions = support.map((roleId) => `<@&${roleId}>`).join(' ');
+  await interaction.channel.send({
+    content: `${mentions}\n🔔 **Staff solicitada por ${interaction.user}.** Quando puder, responda neste ticket.`,
+    allowedMentions: { roles: support, users: [interaction.user.id] }
+  });
+  await query('update tickets set last_staff_notification_at=now() where thread_id=$1 and bot_instance_id=$2', [ticket.thread_id, instance.id]);
+  await logEvent(instance, settings, 'ticket_staff_notified', `${interaction.user.tag} notificou a staff`, {
+    actorId: interaction.user.id,
+    channelId: interaction.channel.id,
+    supportRoleIds: support,
+    category: ticket.status === 'cart' || ticket.status === 'payment_pending' ? 'vendas' : 'tickets'
+  });
+  return safeEphemeral(interaction, 'Staff notificada. Aguarde uma resposta neste ticket.');
+}
+
 async function closeTicket(interaction, instance) {
   if (!interaction.channel?.isThread?.()) return interaction.reply({ content: 'Use dentro de um ticket.', ephemeral: true });
   const settings = await getSettings(instance.id);
-  const ticket = await one('select * from tickets where thread_id=$1', [interaction.channel.id]);
-  const support = Array.isArray(settings.support_role_ids) ? settings.support_role_ids : [];
-  const allowed = ticket?.owner_id === interaction.user.id || interaction.memberPermissions?.has(PermissionFlagsBits.ManageThreads) || support.some((roleId) => interaction.member?.roles?.cache?.has(roleId));
-  if (!allowed) return interaction.reply({ content: 'Apenas o autor ou suporte pode fechar.', ephemeral: true });
+  const ticket = await ticketForThread(instance, interaction.channel.id);
+  if (!ticket) return safeEphemeral(interaction, 'Ticket nao encontrado.');
+  if (!isSupportStaff(interaction, settings)) {
+    return safeEphemeral(interaction, 'Somente o dono do servidor ou cargos de suporte configurados podem fechar este ticket. Use Notificar staff se precisar de atendimento.');
+  }
   await query("update tickets set status='closed', closed_at=now() where thread_id=$1", [interaction.channel.id]);
   await logEvent(instance, settings, 'ticket_closed', `Ticket fechado por ${interaction.user.tag}`, {
     actorId: interaction.user.id,
@@ -1370,6 +1451,7 @@ async function handle(interaction, instance) {
   if (action === 'cart_confirm') return confirmCart(interaction, instance);
   if (action === 'terms_accept') return generateCartPayment(interaction, instance);
   if (action === 'approve') return approvePurchase(interaction, instance);
+  if (action === 'notify_staff') return notifyStaff(interaction, instance);
   if (action === 'close') return closeTicket(interaction, instance);
 }
 
@@ -1394,6 +1476,7 @@ async function start(instance) {
       const mode = withMembersIntent ? 'com members intent' : 'modo basico sem members intent';
       console.log(`[${runnerName}] Online: ${client.user.tag} / ${instance.guild_name} (${mode})`);
       await sync(instance, client, withMembersIntent).catch((error) => setError(instance.id, error.message));
+      await refreshOpenTicketControls(instance, client).catch(console.error);
       if (withMembersIntent) {
         await auditAutoRoles(instance, client, 'bot online / sincronizacao').catch(console.error);
         await auditRecentWelcomes(instance, client).catch(console.error);
