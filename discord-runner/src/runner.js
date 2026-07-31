@@ -24,6 +24,7 @@ const key = Buffer.from(env('BOT_ENCRYPTION_KEY'), 'base64');
 if (key.length !== 32) throw new Error('BOT_ENCRYPTION_KEY deve ser Base64 de 32 bytes.');
 const pollInterval = Math.max(Number(env('POLL_INTERVAL_MS')) || 8000, 3000);
 const fullIntentRetryInterval = Math.max(Number(env('FULL_INTENT_RETRY_MS')) || 60000, 15000);
+const autoRoleAuditInterval = Math.max(Number(env('AUTOROLE_AUDIT_INTERVAL_MS')) || 120000, 30000);
 const runnerName = env('RUNNER_NAME') || 'aurora-zero-runner';
 
 const running = new Map();
@@ -221,7 +222,8 @@ async function logEvent(instance, settings, type, message, metadata = {}) {
 }
 
 async function applyAutoRole(member, instance, settings, reason = 'entrada') {
-  if (!settings?.auto_role_id) return false;
+  if (!settings?.auto_role_id || member.user?.bot) return false;
+  if (member.roles.cache.has(settings.auto_role_id)) return true;
   const guild = member.guild;
   const role = await guild.roles.fetch(settings.auto_role_id).catch(() => null);
   if (!role) {
@@ -273,6 +275,83 @@ async function applyAutoRole(member, instance, settings, reason = 'entrada') {
     await setWarning(instance.id, `${message}. Verifique permissoes e hierarquia do cargo do bot.`).catch(console.error);
     await logEvent(instance, settings, 'auto_role_failed', message, { actorId: member.id, targetId: role.id, reason });
     return false;
+  }
+}
+
+async function sendWelcome(member, instance, settings) {
+  if (!settings?.welcome_channel_id || member.user?.bot) return false;
+  const channel = await member.guild.channels.fetch(settings.welcome_channel_id).catch(() => null);
+  if (!channel?.isTextBased?.()) {
+    const message = `Canal de boas-vindas nao encontrado ou nao e canal de texto. Atualize cargos/canais no site e selecione novamente. ID: ${settings.welcome_channel_id}`;
+    await setWarning(instance.id, message).catch(console.error);
+    await logEvent(instance, settings, 'welcome_failed', message, {
+      actorId: member.id,
+      targetId: settings.welcome_channel_id
+    });
+    return false;
+  }
+  const me = member.guild.members.me || await member.guild.members.fetchMe().catch(() => null);
+  if (me && channel.permissionsFor(me)?.has(PermissionFlagsBits.SendMessages) === false) {
+    const message = `Falha ao enviar boas-vindas: o bot nao tem permissao de Enviar Mensagens no canal #${channel.name}.`;
+    await setWarning(instance.id, message).catch(console.error);
+    await logEvent(instance, settings, 'welcome_failed', message, {
+      actorId: member.id,
+      channelId: channel.id
+    });
+    return false;
+  }
+  try {
+    await channel.send(messagePayload(settings, {
+      mode: settings.welcome_mode,
+      color: settings.welcome_color,
+      title: settings.welcome_title,
+      description: settings.welcome_message,
+      context: { member, settings, channel }
+    }));
+    await logEvent(instance, settings, 'welcome_sent', `Boas-vindas enviada para ${member.user.tag}`, {
+      actorId: member.id,
+      channelId: channel.id
+    });
+    return true;
+  } catch (error) {
+    const message = `Falha ao enviar boas-vindas: ${error.message}. Verifique permissoes no canal configurado.`;
+    console.error(`[${runnerName}] ${message}`);
+    await setWarning(instance.id, message).catch(console.error);
+    await logEvent(instance, settings, 'welcome_failed', message, {
+      actorId: member.id,
+      channelId: channel.id
+    });
+    return false;
+  }
+}
+
+async function auditAutoRoles(instance, client, reason = 'auditoria automatica') {
+  const settings = await getSettings(instance.id);
+  if (!settings?.auto_role_id) return;
+  const guild = client.guilds.cache.get(instance.guild_id);
+  if (!guild) return;
+  const role = await guild.roles.fetch(settings.auto_role_id).catch(() => null);
+  if (!role) {
+    await applyAutoRole({ guild, id: 'auditoria', user: { tag: 'auditoria', bot: false }, roles: { cache: new Map() } }, instance, settings, reason).catch(() => null);
+    return;
+  }
+  const members = await guild.members.fetch().catch((error) => {
+    const message = `Nao consegui buscar membros para auditar cargo automatico: ${error.message}. Confirme o Server Members Intent no Developer Portal.`;
+    setWarning(instance.id, message).catch(console.error);
+    logEvent(instance, settings, 'auto_role_audit_failed', message, { targetId: role.id }).catch(console.error);
+    return null;
+  });
+  if (!members) return;
+  let applied = 0;
+  for (const member of members.values()) {
+    if (member.user?.bot || member.roles.cache.has(role.id)) continue;
+    if (await applyAutoRole(member, instance, settings, reason)) applied += 1;
+  }
+  if (applied) {
+    await logEvent(instance, settings, 'auto_role_audit', `Auditoria aplicou o cargo automatico ${role.name} em ${applied} membro(s).`, {
+      targetId: role.id,
+      count: applied
+    });
   }
 }
 
@@ -334,7 +413,16 @@ async function sync(instance, client, withMembersIntent = true) {
     values ($1,$2::jsonb,$3::jsonb,now())
     on conflict (bot_instance_id) do update set channels=excluded.channels, roles=excluded.roles, updated_at=now()
   `, [instance.id, JSON.stringify(channels), JSON.stringify(roles)]);
-  await query('update bot_instances set guild_name=$1,last_seen_at=now(),last_error=null,updated_at=now() where id=$2', [guild.name, instance.id]);
+  await query(`
+    update bot_instances
+    set guild_name=$1,
+        bot_name=$2,
+        bot_client_id=$3,
+        last_seen_at=now(),
+        last_error=null,
+        updated_at=now()
+    where id=$4
+  `, [guild.name, client.user?.username || instance.bot_name || 'Bot', client.user?.id || null, instance.id]);
   if (withMembersIntent) await clearWarning(instance.id);
   await guild.commands.set(commands);
 }
@@ -651,6 +739,7 @@ async function start(instance) {
       const mode = withMembersIntent ? 'com members intent' : 'modo basico sem members intent';
       console.log(`[${runnerName}] Online: ${client.user.tag} / ${instance.guild_name} (${mode})`);
       await sync(instance, client, withMembersIntent).catch((error) => setError(instance.id, error.message));
+      if (withMembersIntent) await auditAutoRoles(instance, client, 'bot online / sincronizacao').catch(console.error);
     });
 
     client.on(Events.Error, (error) => {
@@ -668,20 +757,7 @@ async function start(instance) {
           actorId: member.user.id
         });
         await applyAutoRole(member, instance, settings, 'entrada no servidor');
-        if (!settings.welcome_channel_id) return;
-        const channel = await member.guild.channels.fetch(settings.welcome_channel_id).catch(() => null);
-        if (!channel?.isTextBased?.()) return;
-        await channel.send(messagePayload(settings, {
-          mode: settings.welcome_mode,
-          color: settings.welcome_color,
-          title: settings.welcome_title,
-          description: settings.welcome_message,
-          context: { member, settings, channel }
-        })).catch((error) => {
-          const message = `Falha ao enviar boas-vindas: ${error.message}. Verifique permissoes no canal configurado.`;
-          console.error(`[${runnerName}] ${message}`);
-          setWarning(instance.id, message).catch(console.error);
-        });
+        await sendWelcome(member, instance, settings);
       });
 
       client.on(Events.GuildMemberRemove, async (member) => {
@@ -722,7 +798,10 @@ async function start(instance) {
   let client = buildClient(true);
   try {
     await client.login(decrypt(instance.token_encrypted));
-    running.set(instance.id, { client, withMembersIntent: true, nextFullRetryAt: null });
+    const auditTimer = setInterval(() => {
+      auditAutoRoles(instance, client, 'auditoria periodica').catch(console.error);
+    }, autoRoleAuditInterval);
+    running.set(instance.id, { client, withMembersIntent: true, nextFullRetryAt: null, auditTimer });
   } catch (error) {
     if (/disallowed intents/i.test(error.message || '')) {
       client.destroy();
@@ -745,6 +824,7 @@ async function start(instance) {
 async function stop(id) {
   const entry = running.get(id);
   if (!entry) return;
+  if (entry.auditTimer) clearInterval(entry.auditTimer);
   entry.client.destroy();
   running.delete(id);
 }
