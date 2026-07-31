@@ -327,6 +327,56 @@ async function syncGuildResources(instance) {
   return saved || { channels, roles, updated_at: new Date().toISOString() };
 }
 
+function colorInt(value, fallback = '#5865f2') {
+  return Number.parseInt(hexColor(value, fallback).replace('#', ''), 16);
+}
+
+function discordEmbed(settings, title, description, color) {
+  return {
+    color: colorInt(color, settings?.brand_color || '#5865f2'),
+    title: text(title || settings?.brand_name || 'Aurora', 256),
+    description: text(description || '', 4000),
+    footer: { text: text(settings?.brand_name || 'Aurora Store', 200) }
+  };
+}
+
+function discordButton(customId, label, style = 1) {
+  return { type: 2, custom_id: customId, label: text(label || 'Abrir', 80), style };
+}
+
+function discordRow(...components) {
+  return { type: 1, components: components.slice(0, 5) };
+}
+
+function productPrice(product) {
+  const variations = Array.isArray(product.variations) ? product.variations : [];
+  return product.product_type === 'variation' ? (variations[0]?.price || product.price || 'R$ 0,00') : (product.price || 'R$ 0,00');
+}
+
+function productCardPayload(settings, product) {
+  const stock = product.stock === null || product.stock === undefined ? 'Ilimitado' : String(product.stock);
+  const lines = [
+    product.delivery_content ? '⚡ **Entrega Automática!**' : '',
+    product.description || 'Produto disponível para compra.',
+    '',
+    `**Valor à vista**\n\`${productPrice(product)}\``,
+    `**Restam**\n\`${stock}\``
+  ].filter(Boolean);
+  const card = discordEmbed(settings, product.name, lines.join('\n'), settings.sales_color);
+  if (/^https?:\/\//i.test(String(product.image_url || ''))) card.image = { url: product.image_url };
+  return {
+    embeds: [card],
+    components: [discordRow(discordButton(`az:buy:${product.id}`, '🛒 Comprar', 3))]
+  };
+}
+
+async function sendBotMessage(instance, channelId, payload) {
+  return discordJson(`/channels/${channelId}/messages`, decrypt(instance.token_encrypted), {
+    allowed_mentions: { parse: ['users', 'roles'] },
+    ...payload
+  });
+}
+
 async function session(req) {
   authReady();
   const payload = readCookie(req);
@@ -823,6 +873,74 @@ app.get('/api/instances/:id/logs', async (req, res, next) => {
       limit 150
     `, [instance.id]);
     res.json({ logs });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/instances/:id/publish', async (req, res, next) => {
+  try {
+    const user = await requireSession(req, res);
+    if (!user) return;
+    const instance = await getInstance(req.params.id, user.discord_id);
+    if (!instance) return res.status(404).json({ error: 'not_found' });
+    if (!instance.token_encrypted) return res.status(400).json({ error: 'token_required', message: 'Salve o token do bot antes de publicar.' });
+    const settings = await ensureSettings(instance.id);
+    const type = text(req.body?.type || 'control', 30);
+    const overrideChannel = snowflake(req.body?.channel_id);
+    let channelId = overrideChannel;
+
+    if (type === 'auth') channelId ||= settings.auth_channel_id;
+    if (type === 'ticket') channelId ||= settings.ticket_channel_id;
+    if (type === 'sales') channelId ||= settings.sales_channel_id;
+    if (type === 'control') channelId ||= settings.sales_channel_id || settings.ticket_channel_id || settings.auth_channel_id;
+    if (!channelId) return res.status(400).json({ error: 'channel_required', message: 'Selecione e salve um canal antes de publicar.' });
+
+    if (type === 'auth') {
+      await sendBotMessage(instance, channelId, {
+        embeds: [discordEmbed(settings, settings.auth_title, settings.auth_message, settings.auth_color)],
+        components: [discordRow(discordButton('az:auth', settings.auth_button_label || 'Verificar acesso', 3))]
+      });
+      return res.json({ ok: true, message: 'Painel de autenticação publicado.' });
+    }
+
+    if (type === 'ticket') {
+      await sendBotMessage(instance, channelId, {
+        embeds: [discordEmbed(settings, settings.ticket_title, settings.ticket_message, settings.ticket_color)],
+        components: [discordRow(discordButton('az:ticket', settings.ticket_button_label || 'Abrir ticket', 1))]
+      });
+      return res.json({ ok: true, message: 'Painel de ticket publicado.' });
+    }
+
+    if (type === 'sales') {
+      const products = await query('select * from products where bot_instance_id = $1 and active=true order by created_at desc', [instance.id]);
+      await sendBotMessage(instance, channelId, {
+        embeds: [discordEmbed(
+          settings,
+          settings.sales_title || 'Minha loja',
+          products.length ? (settings.sales_message || 'Escolha um produto abaixo para abrir seu carrinho.') : `${settings.sales_message || 'Escolha um produto abaixo para abrir seu carrinho.'}\n\nNenhum produto ativo cadastrado ainda.`,
+          settings.sales_color
+        )]
+      });
+      for (const product of products.slice(0, 20)) await sendBotMessage(instance, channelId, productCardPayload(settings, product));
+      return res.json({ ok: true, message: `Vitrine publicada com ${products.length} produto(s).` });
+    }
+
+    await sendBotMessage(instance, channelId, {
+      embeds: [discordEmbed(
+        settings,
+        'Painel de Controle',
+        'Gerencie pelo site: Minha loja, Ticket, Boas-vindas, Automações, Customizar, AuroraCloud, Extrato, Giveaway, Configurações e AuroraProtect.',
+        settings.brand_color
+      )],
+      components: [
+        discordRow(
+          discordButton('az:ticket', 'Ticket', 1),
+          discordButton('az:auth', 'Boas-Vindas / Verificar', 3)
+        )
+      ]
+    });
+    return res.json({ ok: true, message: 'Painel de controle publicado.' });
   } catch (error) {
     next(error);
   }

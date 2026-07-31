@@ -69,6 +69,27 @@
             <button type="button" data-jump-tab="settings">⚙️ Configuracoes</button>
             <button type="button" data-jump-tab="protect">🛡️ AuroraProtect</button>
           </div>
+          <div class="overview-grid">
+            <div><strong id="statProducts">0</strong><small>Produtos cadastrados</small></div>
+            <div><strong id="statRoles">0</strong><small>Cargos sincronizados</small></div>
+            <div><strong id="statChannels">0</strong><small>Canais sincronizados</small></div>
+            <div><strong id="statLogs">0</strong><small>Logs recentes</small></div>
+          </div>
+          <div class="publish-card">
+            <div>
+              <h3>Publicar painel no Discord</h3>
+              <p>Escolha o canal e publique o painel principal igual ao exemplo. As configuracoes detalhadas continuam sendo feitas pelo site.</p>
+            </div>
+            <div class="grid">
+              <label><span>Canal de publicacao</span><select id="publishChannel" data-kind="channel"></select></label>
+              <div class="publish-actions">
+                <button type="button" class="primary" data-publish-type="control">Publicar painel principal</button>
+                <button type="button" data-publish-type="sales">Publicar loja/produtos</button>
+                <button type="button" data-publish-type="ticket">Publicar ticket</button>
+                <button type="button" data-publish-type="auth">Publicar verificacao</button>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section id="tab-bot" class="tab">
@@ -160,6 +181,7 @@
                 <label><span>Texto botao</span><input id="auth_button_label"></label>
               </div>
               <label><span>Mensagem verificacao</span><textarea id="auth_message" rows="5"></textarea></label>
+              <div class="actions"><button type="button" data-publish-type="auth">Publicar painel de verificacao</button></div>
             </div>
             <div class="preview-rail">
               <div id="auth_preview" class="message-preview"></div>
@@ -182,6 +204,7 @@
                 <label><span>Texto botao</span><input id="ticket_button_label"></label>
               </div>
               <label><span>Mensagem tickets</span><textarea id="ticket_message" rows="5"></textarea></label>
+              <div class="actions"><button type="button" data-publish-type="ticket">Postar painel de ticket</button></div>
             </div>
             <div class="preview-rail">
               <div id="ticket_preview" class="message-preview"></div>
@@ -217,6 +240,7 @@
                 <label><span>Titulo vitrine</span><input id="sales_title"></label>
               </div>
               <label><span>Mensagem vendas</span><textarea id="sales_message" rows="4"></textarea></label>
+              <div class="actions"><button type="button" data-publish-type="sales">Publicar vitrine e produtos</button></div>
             </div>
             <div class="preview-rail">
               <div id="sales_preview" class="message-preview"></div>

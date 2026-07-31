@@ -89,6 +89,19 @@ function header() {
     : online
       ? `Online ${new Date(state.instance.last_seen_at).toLocaleString('pt-BR')}`
       : state.instance.last_error || (state.instance.enabled ? 'Aguardando central 24h' : 'Desligado');
+  renderOverview();
+}
+
+function setText(id, value) {
+  const node = $(id);
+  if (node) node.textContent = value;
+}
+
+function renderOverview() {
+  setText('statProducts', String(state.products?.length || 0));
+  setText('statRoles', String(state.resources?.roles?.length || 0));
+  setText('statChannels', String(state.resources?.channels?.length || 0));
+  setText('statLogs', String(state.logs?.length || 0));
 }
 
 function instanceStatus(instance) {
@@ -177,6 +190,7 @@ function renderSavedBots() {
 function renderResources() {
   document.querySelectorAll('[data-kind="role"]').forEach((select) => fill(select, state.resources.roles || [], state.settings?.[select.id], select.multiple ? '' : 'Nenhum cargo'));
   document.querySelectorAll('[data-kind="channel"]').forEach((select) => fill(select, state.resources.channels || [], state.settings?.[select.id], 'Nenhum canal'));
+  renderOverview();
 }
 
 function sampleVars() {
@@ -270,6 +284,7 @@ function renderSettings() {
 
 function renderProducts() {
   $('products').innerHTML = '';
+  renderOverview();
   if (!state.products.length) {
     const empty = document.createElement('div');
     empty.className = 'product';
@@ -300,6 +315,7 @@ function renderProducts() {
 function renderLogs() {
   const list = $('logsList');
   if (!list) return;
+  renderOverview();
   list.innerHTML = '';
   const filtered = state.logFilter === 'todos'
     ? state.logs
@@ -580,6 +596,37 @@ async function savePayment() {
   msg('Recebimento salvo com seguranca.');
 }
 
+function publishChannelFor(type) {
+  const manual = read('publishChannel');
+  if (manual) return manual;
+  if (type === 'sales') return read('sales_channel_id');
+  if (type === 'ticket') return read('ticket_channel_id');
+  if (type === 'auth') return read('auth_channel_id');
+  return read('sales_channel_id') || read('ticket_channel_id') || read('auth_channel_id');
+}
+
+async function publishPanel(type) {
+  if (!state.instance) return msg('Salve o bot antes de publicar paineis.', true);
+  const button = document.querySelector(`[data-publish-type="${type}"]`);
+  const old = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Publicando...';
+  }
+  try {
+    const data = await api(`/api/instances/${state.instance.id}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({ type, channel_id: publishChannelFor(type) })
+    });
+    msg(data.message || 'Painel publicado.');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = old;
+    }
+  }
+}
+
 async function deleteProduct(id) {
   await api(`/api/instances/${state.instance.id}/products/${id}`, { method: 'DELETE' });
   state.products = state.products.filter((product) => product.id !== id);
@@ -628,6 +675,9 @@ function bind() {
   });
   document.querySelectorAll('[data-jump-tab]').forEach((button) => {
     button.onclick = () => openTab(button.dataset.jumpTab);
+  });
+  document.querySelectorAll('[data-publish-type]').forEach((button) => {
+    button.onclick = () => publishPanel(button.dataset.publishType).catch((error) => msg(error.message, true));
   });
   $('guildSelect').onchange = (event) => selectGuild(event.target.value).catch((error) => msg(error.message, true));
   $('saveInstance').onclick = () => saveInstance().catch((error) => msg(error.message, true));
