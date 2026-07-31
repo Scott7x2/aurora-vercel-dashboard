@@ -165,7 +165,7 @@ function productVariations(value) {
 }
 
 function paymentProvider(value) {
-  const allowed = new Set(['aurora', 'manual', 'mercadopago', 'stripe', 'pagseguro', 'asaas', 'other']);
+  const allowed = new Set(['aurora', 'pix', 'external', 'manual', 'mercadopago', 'stripe', 'pagseguro', 'asaas', 'other']);
   return allowed.has(value) ? value : 'aurora';
 }
 
@@ -355,8 +355,52 @@ async function ensureSettings(instanceId) {
 }
 
 async function ensurePayment(instanceId) {
+  await ensureCommerceSchema();
   await query('insert into payment_settings (bot_instance_id) values ($1) on conflict (bot_instance_id) do nothing', [instanceId]);
   return one('select * from payment_settings where bot_instance_id = $1', [instanceId]);
+}
+
+async function ensureCommerceSchema() {
+  await query(`
+    alter table products
+      add column if not exists product_type text not null default 'single',
+      add column if not exists variations jsonb not null default '[]'::jsonb,
+      add column if not exists stock integer,
+      add column if not exists delivery_content text,
+      add column if not exists low_stock_notified boolean not null default false
+  `);
+  await query(`
+    create table if not exists payment_settings (
+      bot_instance_id uuid primary key references bot_instances(id) on delete cascade,
+      provider text not null default 'aurora',
+      checkout_mode text not null default 'ticket',
+      receiver_name text,
+      public_instructions text,
+      private_details_encrypted text,
+      updated_at timestamptz not null default now()
+    )
+  `);
+  await query("alter table payment_settings alter column provider set default 'aurora'");
+  await query(`
+    create table if not exists payment_orders (
+      id uuid primary key default gen_random_uuid(),
+      bot_instance_id uuid not null references bot_instances(id) on delete cascade,
+      ticket_thread_id text,
+      guild_id text not null,
+      buyer_id text not null,
+      product_id bigint references products(id) on delete set null,
+      product_name text not null default 'Produto',
+      product_variant jsonb,
+      amount_text text not null default '',
+      provider text not null default 'aurora',
+      status text not null default 'pending',
+      approved_at timestamptz,
+      created_at timestamptz not null default now()
+    )
+  `);
+  await query('alter table tickets add column if not exists payment_order_id uuid references payment_orders(id) on delete set null');
+  await query('alter table payment_settings enable row level security');
+  await query('alter table payment_orders enable row level security');
 }
 
 app.get('/app.css', (_, res) => res.sendFile(path.join(publicDir, 'app.css')));
@@ -576,6 +620,7 @@ app.get('/api/instances/:id/settings', async (req, res, next) => {
     if (!user) return;
     const instance = await getInstance(req.params.id, user.discord_id);
     if (!instance) return res.status(404).json({ error: 'not_found' });
+    await ensureCommerceSchema();
     const settings = await ensureSettings(instance.id);
     const products = await query('select * from products where bot_instance_id = $1 order by created_at desc', [instance.id]);
     const payment = publicPayment(await ensurePayment(instance.id));
@@ -702,6 +747,7 @@ app.post('/api/instances/:id/products', async (req, res, next) => {
     if (!user) return;
     const instance = await getInstance(req.params.id, user.discord_id);
     if (!instance) return res.status(404).json({ error: 'not_found' });
+    await ensureCommerceSchema();
     const name = text(req.body.name, 80);
     const type = productType(req.body.product_type);
     const variations = productVariations(req.body.variations);
@@ -710,10 +756,11 @@ app.post('/api/instances/:id/products', async (req, res, next) => {
     if (type === 'single' && !price) return res.status(400).json({ error: 'price_required', message: 'Digite o preco do produto unico.' });
     if (type === 'variation' && !variations.length) return res.status(400).json({ error: 'variations_required', message: 'Cadastre pelo menos uma variacao no formato: 1 dia | R$ 5,00 | descricao opcional.' });
     const saved = await one(`
-      insert into products (bot_instance_id,name,price,product_type,variations,stock,delivery_content,description,image_url,active)
-      values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10) returning *
+      insert into products (bot_instance_id,guild_id,name,price,product_type,variations,stock,delivery_content,description,image_url,active)
+      values ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11) returning *
     `, [
       instance.id,
+      instance.guild_id,
       name,
       price,
       type,

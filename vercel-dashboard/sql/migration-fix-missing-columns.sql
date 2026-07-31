@@ -81,6 +81,7 @@ create table if not exists payment_settings (
   private_details_encrypted text,
   updated_at timestamptz not null default now()
 );
+alter table payment_settings alter column provider set default 'aurora';
 alter table payment_settings enable row level security;
 
 create table if not exists payment_orders (

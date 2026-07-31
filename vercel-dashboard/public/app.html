@@ -177,18 +177,18 @@
           </div>
           <div class="payment-card">
             <div>
-              <h3>Aurora Pay interno</h3>
-              <p>Gateway intermediario do proprio painel: cada compra gera um pedido interno com ID, status e log. Ele organiza o checkout e evita expor dados reais no frontend; a aprovacao ainda fica com o dono/suporte.</p>
+              <h3>Pagamento</h3>
+              <p>Escolha um fluxo simples. O recomendado e Aurora Pay: ele cria um pedido interno com ID, organiza o ticket, registra logs e evita expor dados sensiveis no site.</p>
             </div>
             <div class="grid">
-              <label><span>Gateway</span><select id="paymentProvider"><option value="aurora">Aurora Pay interno</option><option value="manual">Manual / combinar no ticket</option><option value="mercadopago">Mercado Pago</option><option value="stripe">Stripe</option><option value="pagseguro">PagSeguro</option><option value="asaas">Asaas</option><option value="other">Outro gateway</option></select></label>
-              <label><span>Fluxo</span><select id="checkoutMode"><option value="ticket">Pedido interno + ticket</option><option value="external">Link externo/intermediario</option></select></label>
+              <label><span>Metodo</span><select id="paymentProvider"><option value="aurora">Aurora Pay interno recomendado</option><option value="pix">Pix/manual no ticket</option><option value="external">Link de pagamento externo</option></select></label>
+              <label><span>Fluxo</span><select id="checkoutMode"><option value="ticket">Criar pedido + ticket</option><option value="external">Enviar link externo</option></select></label>
               <label><span>Nome do recebedor</span><input id="receiverName" placeholder="Nome da loja ou recebedor"></label>
-              <label><span>Dado privado criptografado</span><input id="privatePaymentDetails" type="password" placeholder="Pix/chave/token interno - nao aparece no frontend"></label>
+              <label><span>Dado privado criptografado</span><input id="privatePaymentDetails" type="password" placeholder="Chave Pix ou observacao privada opcional"></label>
             </div>
-            <label><span>Instrucoes publicas de pagamento</span><textarea id="publicPaymentInstructions" rows="3" placeholder="Ex: Apos abrir o ticket, envie o comprovante. Link do checkout: https://..."></textarea></label>
+            <label><span>Texto que aparece no ticket</span><textarea id="publicPaymentInstructions" rows="3" placeholder="Ex: Envie o comprovante aqui no ticket. Se usar link externo, cole o link aqui."></textarea></label>
             <div class="actions">
-              <button id="savePayment" class="primary">Salvar recebimento</button>
+              <button id="savePayment" class="primary">Salvar pagamento</button>
               <small id="paymentStatus">Nenhum recebimento configurado.</small>
             </div>
           </div>

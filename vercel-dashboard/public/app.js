@@ -337,10 +337,13 @@ function renderPayment() {
   if ($('publicPaymentInstructions')) $('publicPaymentInstructions').value = payment.public_instructions || '';
   if ($('privatePaymentDetails')) $('privatePaymentDetails').value = '';
   if ($('paymentStatus')) {
+    const labels = { aurora: 'Aurora Pay interno', pix: 'Pix/manual', external: 'Link externo', manual: 'Manual' };
+    const method = labels[payment.provider] || 'Aurora Pay interno';
     $('paymentStatus').textContent = payment.has_private_details
-      ? `Dado privado salvo: ${payment.private_details_preview || 'criptografado'}`
-      : 'Nenhum dado privado salvo. Use gateway intermediario para maior seguranca.';
+      ? `${method} salvo. Dado privado: ${payment.private_details_preview || 'criptografado'}`
+      : `${method} salvo. Nenhum dado privado cadastrado.`;
   }
+  renderPaymentMode();
 }
 
 function renderProductMode() {
@@ -351,6 +354,25 @@ function renderProductMode() {
   document.querySelectorAll('[data-product-variation]').forEach((node) => {
     node.style.display = type === 'variation' ? 'grid' : 'none';
   });
+}
+
+function renderPaymentMode() {
+  const provider = $('paymentProvider')?.value || 'aurora';
+  if ($('checkoutMode')) $('checkoutMode').value = provider === 'external' ? 'external' : 'ticket';
+  if ($('privatePaymentDetails')) {
+    $('privatePaymentDetails').placeholder = provider === 'external'
+      ? 'Token interno/observacao privada opcional'
+      : provider === 'pix'
+        ? 'Chave Pix opcional - fica criptografada'
+        : 'Observacao privada opcional - fica criptografada';
+  }
+  if ($('publicPaymentInstructions')) {
+    $('publicPaymentInstructions').placeholder = provider === 'external'
+      ? 'Cole aqui o link de pagamento externo e as instrucoes para o comprador.'
+      : provider === 'pix'
+        ? 'Ex: Envie o comprovante aqui no ticket apos pagar no Pix.'
+        : 'Ex: O pedido sera criado no Aurora Pay. Aguarde o suporte conferir e aprovar.';
+  }
 }
 
 async function selectGuild(id) {
@@ -596,6 +618,7 @@ function bind() {
   $('saveSettings').onclick = () => saveSettings().catch((error) => msg(error.message, true));
   $('addProduct').onclick = () => addProduct().catch((error) => msg(error.message, true));
   $('productType').onchange = renderProductMode;
+  $('paymentProvider').onchange = renderPaymentMode;
   $('savePayment').onclick = () => savePayment().catch((error) => msg(error.message, true));
   $('reloadLogs').onclick = () => loadLogs().catch((error) => msg(error.message, true));
   $('uploadEmoji').onclick = () => uploadEmoji().catch((error) => msg(error.message, true));
@@ -610,6 +633,7 @@ function bind() {
 async function init() {
   bind();
   renderProductMode();
+  renderPaymentMode();
   try {
     state.me = await api('/api/me');
     await loadGuilds();

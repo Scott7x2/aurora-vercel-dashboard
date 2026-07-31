@@ -289,6 +289,8 @@ function paymentText(payment) {
   const lines = [];
   const providerNames = {
     aurora: 'Aurora Pay interno',
+    pix: 'Pix/manual',
+    external: 'Link externo',
     manual: 'Manual / combinado no ticket',
     mercadopago: 'Mercado Pago',
     stripe: 'Stripe',
