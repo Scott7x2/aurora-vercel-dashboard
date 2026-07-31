@@ -23,19 +23,6 @@
           <button class="active" data-tab="bot">Criar bot</button>
           <button data-tab="saved">Bots salvos</button>
           <button data-tab="central">Painel</button>
-          <button data-tab="sales">Minha loja</button>
-          <button data-tab="tickets">Ticket</button>
-          <button data-tab="auth">Boas-Vindas</button>
-          <button data-tab="automations">Automacoes</button>
-          <button data-tab="identity">Customizar</button>
-          <button data-tab="cloud">AuroraCloud</button>
-          <button data-tab="statement">Extrato</button>
-          <button data-tab="giveaway">Giveaway</button>
-          <button data-tab="settings">Configuracoes</button>
-          <button data-tab="protect">AuroraProtect</button>
-          <button data-tab="postpurchase">Pos-compra</button>
-          <button data-tab="logs">Logs</button>
-          <button data-tab="variables">Variaveis</button>
         </nav>
         <a href="/logout">Sair</a>
       </aside>
@@ -60,7 +47,8 @@
           <div class="control-grid">
             <button type="button" data-jump-tab="sales">🏬 Minha loja</button>
             <button type="button" data-jump-tab="tickets">🎧 Ticket</button>
-            <button type="button" data-jump-tab="auth">📋 Boas-Vindas</button>
+            <button type="button" data-jump-tab="auth">🔐 Cargos e acesso</button>
+            <button type="button" data-jump-tab="welcome">👋 Boas-vindas</button>
             <button type="button" data-jump-tab="automations">🔄 Automacoes</button>
             <button type="button" data-jump-tab="identity">🎨 Customizar</button>
             <button type="button" data-jump-tab="cloud">☁️ AuroraCloud</button>
@@ -68,6 +56,9 @@
             <button type="button" data-jump-tab="giveaway">🎉 Giveaway</button>
             <button type="button" data-jump-tab="settings">⚙️ Configuracoes</button>
             <button type="button" data-jump-tab="protect">🛡️ AuroraProtect</button>
+            <button type="button" data-jump-tab="postpurchase">📦 Pos-compra</button>
+            <button type="button" data-jump-tab="logs">📑 Logs</button>
+            <button type="button" data-jump-tab="variables">✏️ Variaveis</button>
           </div>
           <div class="overview-grid">
             <div><strong id="statProducts">0</strong><small>Produtos cadastrados</small></div>
@@ -124,7 +115,7 @@
           </div>
           <div class="actions">
             <button id="saveInstance" class="primary">Salvar bot</button>
-            <button id="reloadResources">Atualizar cargos e canais</button>
+            <button id="reloadResources" data-refresh-resources>Atualizar cargos e canais</button>
           </div>
           <a id="inviteBot" class="invite-link disabled" href="#" target="_blank" rel="noreferrer">Adicionar bot ao servidor</a>
           <p class="invite-help">Depois de salvar, use o botao acima. O convite ja inclui as permissoes necessarias para cargos, canais, tickets, vendas, emojis e comandos.</p>
@@ -145,7 +136,11 @@
         </section>
 
         <section id="tab-auth" class="tab">
-          <div class="head"><div><h2>Acesso e entrada</h2><p>Autorole, verificacao e boas-vindas.</p></div></div>
+          <div class="head">
+            <div><h2>Cargos e acesso</h2><p>Defina o cargo de entrada e o fluxo de verificacao.</p></div>
+            <button type="button" data-refresh-resources>Sincronizar cargos e canais</button>
+          </div>
+          <div class="resource-status"><i></i><span data-resource-summary>Nenhum recurso sincronizado</span></div>
           <div class="saved-help">
             <strong>Para o cargo automatico funcionar</strong>
             <p>Ative <b>Server Members Intent</b> no Discord Developer Portal do bot, use o botao <b>Adicionar bot ao servidor</b> para garantir <b>Gerenciar Cargos</b> e deixe o cargo do bot acima do cargo automatico. Sem Members Intent, o Discord nao envia o evento de entrada e nenhum bot consegue identificar quem entrou.</p>
@@ -157,22 +152,6 @@
               <label><span>Cargo ao verificar</span><select id="verified_role_id" data-kind="role"></select></label>
             </div>
             <label class="check"><input id="remove_auto_role_after_verify" type="checkbox"> Remover cargo automatico apos verificar</label>
-          </div>
-
-          <div class="config-preview-row">
-            <div class="setting-card">
-              <h3>Boas-vindas</h3>
-              <div class="grid">
-                <label><span>Canal boas-vindas</span><select id="welcome_channel_id" data-kind="channel"></select></label>
-                <label><span>Tipo mensagem</span><select id="welcome_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
-              </div>
-              <label><span>Titulo boas-vindas</span><input id="welcome_title"></label>
-              <label><span>Mensagem boas-vindas</span><textarea id="welcome_message" rows="5"></textarea></label>
-            </div>
-            <div class="preview-rail">
-              <div id="welcome_preview" class="message-preview"></div>
-              <label><span>Cor boas-vindas</span><input id="welcome_color" type="color"></label>
-            </div>
           </div>
 
           <div class="config-preview-row">
@@ -190,6 +169,37 @@
             <div class="preview-rail">
               <div id="auth_preview" class="message-preview"></div>
               <label><span>Cor verificacao</span><input id="auth_color" type="color"></label>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-welcome" class="tab">
+          <div class="head">
+            <div><h2>Boas-vindas</h2><p>Escolha o canal, escreva a mensagem e teste antes de ativar.</p></div>
+            <button type="button" data-refresh-resources>Sincronizar canais</button>
+          </div>
+          <div class="resource-status"><i></i><span data-resource-summary>Nenhum recurso sincronizado</span></div>
+          <div class="saved-help">
+            <strong>Envio confiavel</strong>
+            <p>O runner acompanha novas entradas e tambem verifica membros que chegaram nos ultimos minutos, evitando perder a mensagem durante uma reconexao. O <b>Server Members Intent</b> precisa estar ativo.</p>
+          </div>
+          <div class="config-preview-row">
+            <div class="setting-card">
+              <h3>Mensagem de entrada</h3>
+              <div class="grid">
+                <label><span>Canal de boas-vindas</span><select id="welcome_channel_id" data-kind="channel"></select></label>
+                <label><span>Formato</span><select id="welcome_mode"><option value="embed">Embed configuravel</option><option value="simple">Mensagem simples</option></select></label>
+              </div>
+              <label><span>Titulo</span><input id="welcome_title" placeholder="Bem-vindo, {username}!"></label>
+              <label><span>Mensagem</span><textarea id="welcome_message" rows="7" placeholder="Ola {user}, seja bem-vindo ao {server}!"></textarea></label>
+              <div class="actions">
+                <button id="testWelcome" type="button" class="primary">Salvar e enviar teste</button>
+                <small>O teste sera enviado para o canal selecionado.</small>
+              </div>
+            </div>
+            <div class="preview-rail">
+              <div id="welcome_preview" class="message-preview"></div>
+              <label><span>Cor da embed</span><input id="welcome_color" type="color"></label>
             </div>
           </div>
         </section>

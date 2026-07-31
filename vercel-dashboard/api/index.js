@@ -292,7 +292,9 @@ async function syncGuildResources(instance) {
     discord(`/guilds/${instance.guild_id}/channels`, token, true),
     discord(`/guilds/${instance.guild_id}/roles`, token, true)
   ]);
-  const textChannelTypes = new Set([0, 5, 10, 11, 12, 15]);
+  // Only channels that accept regular bot messages. Threads and forums cannot
+  // safely be reused as permanent targets for welcome/panel messages.
+  const textChannelTypes = new Set([0, 5]);
   const channels = (Array.isArray(channelsRaw) ? channelsRaw : [])
     .filter((channel) => textChannelTypes.has(Number(channel.type)))
     .map((channel) => ({
@@ -338,6 +340,24 @@ function discordEmbed(settings, title, description, color) {
     description: text(description || '', 4000),
     footer: { text: text(settings?.brand_name || 'Aurora Store', 200) }
   };
+}
+
+function renderDiscordTemplate(value, context = {}) {
+  const variables = {
+    user: context.userId ? `<@${context.userId}>` : '',
+    userMention: context.userId ? `<@${context.userId}>` : '',
+    userId: context.userId || '',
+    username: context.username || '',
+    server: context.guildName || '',
+    guild: context.guildName || '',
+    memberCount: context.memberCount ? String(context.memberCount) : '',
+    channel: context.channelId ? `<#${context.channelId}>` : '',
+    channelMention: context.channelId ? `<#${context.channelId}>` : '',
+    channelName: context.channelName || '',
+    date: new Date().toLocaleDateString('pt-BR'),
+    time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  };
+  return String(value || '').replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key) => variables[key] ?? '');
 }
 
 function discordButton(customId, label, style = 1) {
@@ -768,7 +788,8 @@ app.get('/api/instances/:id/resources', async (req, res, next) => {
     const data = await one('select * from guild_resources where bot_instance_id = $1', [instance.id]);
     const roles = Array.isArray(data?.roles) ? data.roles : [];
     const channels = Array.isArray(data?.channels) ? data.channels : [];
-    const staleOrEmpty = !data || !roles.length || !channels.length;
+    const updatedAt = data?.updated_at ? new Date(data.updated_at).getTime() : 0;
+    const staleOrEmpty = !data || !roles.length || !channels.length || Date.now() - updatedAt > 60_000;
     if (staleOrEmpty && instance.token_encrypted) {
       try {
         return res.json(await syncGuildResources(instance));
@@ -800,6 +821,50 @@ app.post('/api/instances/:id/resources/sync', async (req, res, next) => {
       res.status(error.status && Number(error.status) >= 400 ? Number(error.status) : 400).json({ error: 'resource_sync_failed', message });
     }
   } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/instances/:id/welcome/test', async (req, res, next) => {
+  try {
+    const user = await requireSession(req, res);
+    if (!user) return;
+    const instance = await getInstance(req.params.id, user.discord_id);
+    if (!instance) return res.status(404).json({ error: 'not_found' });
+    const settings = await ensureSettings(instance.id);
+    const channelId = snowflake(settings.welcome_channel_id);
+    if (!channelId) return res.status(400).json({ error: 'welcome_channel_required', message: 'Escolha e salve o canal de boas-vindas primeiro.' });
+
+    const token = decrypt(instance.token_encrypted);
+    const [guild, channel] = await Promise.all([
+      discord(`/guilds/${instance.guild_id}?with_counts=true`, token, true),
+      discord(`/channels/${channelId}`, token, true)
+    ]);
+    if (String(channel.guild_id || '') !== String(instance.guild_id)) {
+      return res.status(400).json({ error: 'invalid_welcome_channel', message: 'O canal escolhido nao pertence ao servidor deste bot.' });
+    }
+    const context = {
+      userId: user.discord_id,
+      username: user.username,
+      guildName: guild.name || instance.guild_name,
+      memberCount: guild.approximate_member_count,
+      channelId,
+      channelName: channel.name
+    };
+    const title = renderDiscordTemplate(settings.welcome_title, context);
+    const description = renderDiscordTemplate(settings.welcome_message, context);
+    const payload = settings.welcome_mode === 'simple'
+      ? { content: `${title ? `**${title}**\n` : ''}${description}`.trim(), allowed_mentions: { parse: ['users'] } }
+      : { embeds: [discordEmbed(settings, title, description, settings.welcome_color)], allowed_mentions: { parse: ['users'] } };
+    await discordJson(`/channels/${channelId}/messages`, token, payload);
+    res.json({ ok: true, channel_id: channelId, channel_name: channel.name });
+  } catch (error) {
+    const message = error.status === 403
+      ? 'O bot nao pode enviar mensagens nesse canal. Ative Ver Canal, Enviar Mensagens e Incorporar Links.'
+      : error.status === 404
+        ? 'Canal nao encontrado. Atualize os canais e selecione novamente.'
+        : error.message;
+    if (error.status === 403 || error.status === 404) return res.status(400).json({ error: 'welcome_test_failed', message });
     next(error);
   }
 });

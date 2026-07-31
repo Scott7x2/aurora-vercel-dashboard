@@ -252,6 +252,12 @@ function renderResources() {
   document.querySelectorAll('[data-kind="channel"]').forEach((select) => fill(select, state.resources.channels || [], state.settings?.[select.id], 'Nenhum canal'));
   document.querySelectorAll('[data-feature-kind="channel"]').forEach((select) => fill(select, state.resources.channels || [], state.features?.automations?.[select.dataset.featureValue || select.id.replace('feature_', '')], 'Nenhum canal'));
   document.querySelectorAll('[data-feature-kind="channels"]').forEach((select) => fill(select, state.resources.channels || [], state.features?.automations?.[select.dataset.featureValue || select.id.replace('feature_', '')], ''));
+  const roleCount = state.resources.roles?.length || 0;
+  const channelCount = state.resources.channels?.length || 0;
+  const syncedAt = state.resources.updated_at ? new Date(state.resources.updated_at).toLocaleString('pt-BR') : 'ainda nao sincronizado';
+  document.querySelectorAll('[data-resource-summary]').forEach((node) => {
+    node.textContent = `${roleCount} cargos e ${channelCount} canais - atualizado ${syncedAt}`;
+  });
   renderOverview();
 }
 
@@ -526,15 +532,23 @@ async function loadResources(force = false) {
   renderResources();
 }
 
-async function refreshResources() {
+async function refreshResources(silent = false) {
   if (!state.instance) return msg('Salve o bot antes de buscar cargos e canais.', true);
-  $('reloadResources').textContent = 'Buscando...';
+  const buttons = [...document.querySelectorAll('[data-refresh-resources]')];
+  buttons.forEach((button) => {
+    button.disabled = true;
+    button.dataset.originalText ||= button.textContent;
+    button.textContent = 'Sincronizando...';
+  });
   try {
     await loadResources(true);
     const count = `${state.resources.roles?.length || 0} cargos e ${state.resources.channels?.length || 0} canais`;
-    msg(`Cargos e canais atualizados: ${count}.`);
+    if (!silent) msg(`Discord sincronizado: ${count}.`);
   } finally {
-    $('reloadResources').textContent = 'Atualizar cargos e canais';
+    buttons.forEach((button) => {
+      button.disabled = false;
+      button.textContent = button.dataset.originalText || 'Sincronizar';
+    });
   }
 }
 
@@ -598,14 +612,31 @@ async function toggle() {
   msg(state.instance.enabled ? 'Bot ativado. A central 24h deve ligar em alguns segundos.' : 'Bot desligado.');
 }
 
-async function saveSettings() {
+async function saveSettings(silent = false) {
   if (!state.instance) return msg('Salve o bot antes de editar configuracoes.', true);
   $('saveState').textContent = 'Salvando...';
   const payload = Object.fromEntries(ids.map((id) => [id, read(id)]));
   state.settings = await api(`/api/instances/${state.instance.id}/settings`, { method: 'PUT', body: JSON.stringify(payload) });
   $('saveState').textContent = 'Salvo.';
   renderPreviews();
-  msg('Configuracoes salvas.');
+  if (!silent) msg('Configuracoes salvas.');
+  return state.settings;
+}
+
+async function testWelcome() {
+  if (!state.instance) return msg('Crie ou abra um bot antes de testar.', true);
+  if (!read('welcome_channel_id')) return msg('Escolha o canal de boas-vindas.', true);
+  const button = $('testWelcome');
+  button.disabled = true;
+  button.textContent = 'Enviando teste...';
+  try {
+    await saveSettings(true);
+    const data = await api(`/api/instances/${state.instance.id}/welcome/test`, { method: 'POST', body: JSON.stringify({}) });
+    msg(`Mensagem de teste enviada em #${data.channel_name}.`);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Salvar e enviar teste';
+  }
 }
 
 async function addProduct() {
@@ -744,12 +775,15 @@ function bind() {
   const openTab = (tab) => {
     const button = document.querySelector(`nav button[data-tab="${tab}"]`);
     const section = $(`tab-${tab}`);
-    if (!button || !section) return;
+    if (!section) return;
     document.querySelectorAll('nav button').forEach((item) => item.classList.remove('active'));
     document.querySelectorAll('.tab').forEach((item) => item.classList.remove('active'));
-    button.classList.add('active');
+    (button || document.querySelector('nav button[data-tab="central"]'))?.classList.add('active');
     section.classList.add('active');
-    $('crumb').textContent = button.textContent;
+    $('crumb').textContent = button?.textContent || section.querySelector('h2')?.textContent || 'Painel';
+    if (['auth', 'welcome', 'tickets', 'sales', 'automations', 'settings'].includes(tab) && state.instance) {
+      refreshResources(true).catch((error) => msg(error.message, true));
+    }
   };
   document.querySelectorAll('nav button').forEach((button) => button.onclick = () => {
     openTab(button.dataset.tab);
@@ -763,7 +797,10 @@ function bind() {
   $('guildSelect').onchange = (event) => selectGuild(event.target.value).catch((error) => msg(error.message, true));
   $('saveInstance').onclick = () => saveInstance().catch((error) => msg(error.message, true));
   $('enabled').onchange = () => toggle().catch((error) => msg(error.message, true));
-  $('reloadResources').onclick = () => refreshResources().catch((error) => msg(error.message, true));
+  document.querySelectorAll('[data-refresh-resources]').forEach((button) => {
+    button.onclick = () => refreshResources().catch((error) => msg(error.message, true));
+  });
+  $('testWelcome').onclick = () => testWelcome().catch((error) => msg(error.message, true));
   $('saveSettings').onclick = () => saveSettings().catch((error) => msg(error.message, true));
   $('addProduct').onclick = () => addProduct().catch((error) => msg(error.message, true));
   $('productType').onchange = renderProductMode;

@@ -253,8 +253,18 @@ async function ensureRuntimeSchema() {
       created_at timestamptz not null default now()
     )
   `);
+  await query(`
+    create table if not exists member_welcome_deliveries (
+      bot_instance_id uuid not null references bot_instances(id) on delete cascade,
+      guild_id text not null,
+      user_id text not null,
+      welcomed_at timestamptz not null default now(),
+      primary key (bot_instance_id, user_id)
+    )
+  `);
   await query('alter table feature_settings enable row level security');
   await query('alter table backup_snapshots enable row level security');
+  await query('alter table member_welcome_deliveries enable row level security');
 }
 
 function featureDefaults() {
@@ -585,6 +595,13 @@ async function sendWelcome(member, instance, settings) {
     });
     return false;
   }
+  const delivery = await one(`
+    insert into member_welcome_deliveries (bot_instance_id,guild_id,user_id,welcomed_at)
+    values ($1,$2,$3,now())
+    on conflict (bot_instance_id,user_id) do nothing
+    returning user_id
+  `, [instance.id, member.guild.id, member.id]);
+  if (!delivery) return true;
   try {
     await channel.send(messagePayload(settings, {
       mode: settings.welcome_mode,
@@ -599,6 +616,7 @@ async function sendWelcome(member, instance, settings) {
     });
     return true;
   } catch (error) {
+    await query('delete from member_welcome_deliveries where bot_instance_id=$1 and user_id=$2', [instance.id, member.id]).catch(console.error);
     const message = `Falha ao enviar boas-vindas: ${error.message}. Verifique permissoes no canal configurado.`;
     console.error(`[${runnerName}] ${message}`);
     await setWarning(instance.id, message).catch(console.error);
@@ -608,6 +626,23 @@ async function sendWelcome(member, instance, settings) {
     });
     return false;
   }
+}
+
+async function auditRecentWelcomes(instance, client) {
+  const settings = await getSettings(instance.id);
+  if (!settings?.welcome_channel_id) return;
+  const guild = client.guilds.cache.get(instance.guild_id);
+  if (!guild) return;
+  const members = await guild.members.fetch().catch((error) => {
+    setWarning(instance.id, `Nao consegui verificar entradas recentes: ${error.message}. Confirme o Server Members Intent.`).catch(console.error);
+    return null;
+  });
+  if (!members) return;
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  const recent = [...members.values()]
+    .filter((member) => !member.user?.bot && Number(member.joinedTimestamp || 0) >= cutoff)
+    .sort((a, b) => Number(a.joinedTimestamp || 0) - Number(b.joinedTimestamp || 0));
+  for (const member of recent) await sendWelcome(member, instance, settings);
 }
 
 async function auditAutoRoles(instance, client, reason = 'auditoria automatica') {
@@ -933,7 +968,7 @@ function paymentText(payment) {
   return lines.join('\n');
 }
 
-async function sync(instance, client, withMembersIntent = true) {
+async function sync(instance, client, withMembersIntent = true, registerCommands = true) {
   const guild = client.guilds.cache.get(instance.guild_id);
   if (!guild) {
     await setError(instance.id, 'Esse bot ainda nao esta no servidor selecionado.');
@@ -942,7 +977,7 @@ async function sync(instance, client, withMembersIntent = true) {
   await guild.channels.fetch().catch(() => null);
   await guild.roles.fetch().catch(() => null);
   const channels = [...guild.channels.cache.values()]
-    .filter((channel) => channel?.isTextBased?.() && channel.type !== ChannelType.DM)
+    .filter((channel) => channel?.type === ChannelType.GuildText || channel?.type === ChannelType.GuildAnnouncement)
     .map((channel) => ({ id: channel.id, name: channel.name, type: channel.type }))
     .sort((a, b) => a.name.localeCompare(b.name));
   const roles = [...guild.roles.cache.values()]
@@ -966,7 +1001,7 @@ async function sync(instance, client, withMembersIntent = true) {
     where id=$4
   `, [guild.name, client.user?.username || instance.bot_name || 'Bot', client.user?.id || null, instance.id]);
   if (withMembersIntent) await clearWarning(instance.id);
-  await guild.commands.set(commands);
+  if (registerCommands) await guild.commands.set(commands);
 }
 
 async function panel(instanceId, type, context = {}) {
@@ -1346,12 +1381,23 @@ async function start(instance) {
       ? [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages]
       : [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages];
     const client = new Client({ intents });
+    let pendingResourceSync = null;
+    const scheduleResourceSync = () => {
+      if (pendingResourceSync) clearTimeout(pendingResourceSync);
+      pendingResourceSync = setTimeout(() => {
+        pendingResourceSync = null;
+        sync(instance, client, withMembersIntent, false).catch((error) => setError(instance.id, error.message));
+      }, 1200);
+    };
 
     client.once(Events.ClientReady, async () => {
       const mode = withMembersIntent ? 'com members intent' : 'modo basico sem members intent';
       console.log(`[${runnerName}] Online: ${client.user.tag} / ${instance.guild_name} (${mode})`);
       await sync(instance, client, withMembersIntent).catch((error) => setError(instance.id, error.message));
-      if (withMembersIntent) await auditAutoRoles(instance, client, 'bot online / sincronizacao').catch(console.error);
+      if (withMembersIntent) {
+        await auditAutoRoles(instance, client, 'bot online / sincronizacao').catch(console.error);
+        await auditRecentWelcomes(instance, client).catch(console.error);
+      }
     });
 
     client.on(Events.Error, (error) => {
@@ -1360,6 +1406,12 @@ async function start(instance) {
     });
     client.on(Events.Warn, (warning) => console.warn(`[${runnerName}] Discord warning (${instance.bot_name || instance.id}):`, warning));
     client.on(Events.GuildCreate, () => sync(instance, client, withMembersIntent).catch((error) => setError(instance.id, error.message)));
+    client.on(Events.ChannelCreate, scheduleResourceSync);
+    client.on(Events.ChannelUpdate, scheduleResourceSync);
+    client.on(Events.ChannelDelete, scheduleResourceSync);
+    client.on(Events.GuildRoleCreate, scheduleResourceSync);
+    client.on(Events.GuildRoleUpdate, scheduleResourceSync);
+    client.on(Events.GuildRoleDelete, scheduleResourceSync);
 
     if (withMembersIntent) {
       client.on(Events.GuildMemberAdd, async (member) => {
@@ -1379,6 +1431,7 @@ async function start(instance) {
       client.on(Events.GuildMemberRemove, async (member) => {
         if (member.guild.id !== instance.guild_id) return;
         const settings = await getSettings(instance.id);
+        await query('delete from member_welcome_deliveries where bot_instance_id=$1 and user_id=$2', [instance.id, member.id]).catch(console.error);
         await logEvent(instance, settings, 'member_leave', `${member.user?.tag || member.id} saiu do servidor`, {
           actorId: member.id
         });
@@ -1426,6 +1479,8 @@ async function start(instance) {
     const auditTimer = setInterval(() => {
       auditAutoRoles(instance, client, 'auditoria periodica').catch(console.error);
     }, autoRoleAuditInterval);
+    const welcomeTimer = setInterval(() => auditRecentWelcomes(instance, client).catch(console.error), 60000);
+    const resourceTimer = setInterval(() => sync(instance, client, true, false).catch(console.error), 60000);
     const featureTimer = setInterval(async () => {
       const features = await getFeatures(instance.id);
       const settings = await getSettings(instance.id);
@@ -1433,7 +1488,7 @@ async function start(instance) {
     }, 30000);
     const autoMessageTimer = setInterval(() => runAutoMessage(instance, client).catch(console.error), 60000);
     const backupTimer = setInterval(() => runCloudBackup(instance).catch(console.error), 60 * 60 * 1000);
-    running.set(instance.id, { client, withMembersIntent: true, nextFullRetryAt: null, auditTimer, featureTimer, autoMessageTimer, backupTimer });
+    running.set(instance.id, { client, withMembersIntent: true, nextFullRetryAt: null, auditTimer, welcomeTimer, resourceTimer, featureTimer, autoMessageTimer, backupTimer });
   } catch (error) {
     if (/disallowed intents/i.test(error.message || '')) {
       client.destroy();
@@ -1450,7 +1505,8 @@ async function start(instance) {
         }, 30000);
         const autoMessageTimer = setInterval(() => runAutoMessage(instance, client).catch(console.error), 60000);
         const backupTimer = setInterval(() => runCloudBackup(instance).catch(console.error), 60 * 60 * 1000);
-        running.set(instance.id, { client, withMembersIntent: false, nextFullRetryAt: Date.now() + fullIntentRetryInterval, featureTimer, autoMessageTimer, backupTimer });
+        const resourceTimer = setInterval(() => sync(instance, client, false, false).catch(console.error), 60000);
+        running.set(instance.id, { client, withMembersIntent: false, nextFullRetryAt: Date.now() + fullIntentRetryInterval, resourceTimer, featureTimer, autoMessageTimer, backupTimer });
         return;
       } catch (fallbackError) {
         await setError(instance.id, fallbackError.message);
@@ -1464,6 +1520,8 @@ async function stop(id) {
   const entry = running.get(id);
   if (!entry) return;
   if (entry.auditTimer) clearInterval(entry.auditTimer);
+  if (entry.welcomeTimer) clearInterval(entry.welcomeTimer);
+  if (entry.resourceTimer) clearInterval(entry.resourceTimer);
   if (entry.featureTimer) clearInterval(entry.featureTimer);
   if (entry.autoMessageTimer) clearInterval(entry.autoMessageTimer);
   if (entry.backupTimer) clearInterval(entry.backupTimer);

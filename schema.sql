@@ -193,6 +193,14 @@ create table if not exists backup_snapshots (
   created_at timestamptz not null default now()
 );
 
+create table if not exists member_welcome_deliveries (
+  bot_instance_id uuid not null references bot_instances(id) on delete cascade,
+  guild_id text not null,
+  user_id text not null,
+  welcomed_at timestamptz not null default now(),
+  primary key (bot_instance_id, user_id)
+);
+
 alter table dashboard_sessions enable row level security;
 alter table bot_instances enable row level security;
 alter table guild_resources enable row level security;
@@ -205,3 +213,4 @@ alter table cart_items enable row level security;
 alter table bot_logs enable row level security;
 alter table feature_settings enable row level security;
 alter table backup_snapshots enable row level security;
+alter table member_welcome_deliveries enable row level security;
