@@ -1,10 +1,12 @@
-const state = { me: null, guilds: [], instances: [], guild: null, instance: null, resources: { channels: [], roles: [] }, settings: null, payment: null, products: [], logs: [] };
+const state = { me: null, guilds: [], instances: [], guild: null, instance: null, resources: { channels: [], roles: [] }, settings: null, payment: null, products: [], logs: [], logFilter: 'todos' };
 const ids = [
   'brand_name', 'brand_color', 'auto_role_id', 'verified_role_id', 'remove_auto_role_after_verify',
   'welcome_channel_id', 'welcome_mode', 'welcome_color', 'welcome_title', 'welcome_message',
   'auth_channel_id', 'auth_mode', 'auth_color', 'auth_title',
   'auth_message', 'auth_button_label', 'ticket_channel_id', 'support_role_ids', 'ticket_mode', 'ticket_color', 'ticket_title',
-  'ticket_message', 'ticket_button_label', 'sales_channel_id', 'sales_mode', 'sales_color', 'sales_title', 'sales_message',
+  'ticket_message', 'ticket_button_label', 'ticket_open_color', 'ticket_open_title', 'ticket_open_message',
+  'ticket_open_purchase_title', 'ticket_open_purchase_message',
+  'sales_channel_id', 'sales_mode', 'sales_color', 'sales_title', 'sales_message',
   'delivery_mode', 'delivery_color', 'delivery_title', 'delivery_message',
   'review_channel_id', 'review_color', 'review_title', 'review_message', 'review_gif_url',
   'log_channel_id', 'stock_warn_threshold',
@@ -257,7 +259,7 @@ function renderMessagePreview(prefix) {
 }
 
 function renderPreviews() {
-  ['welcome', 'auth', 'ticket', 'sales', 'delivery', 'review'].forEach(renderMessagePreview);
+  ['welcome', 'auth', 'ticket', 'ticket_open', 'sales', 'delivery', 'review'].forEach(renderMessagePreview);
 }
 
 function renderSettings() {
@@ -299,18 +301,21 @@ function renderLogs() {
   const list = $('logsList');
   if (!list) return;
   list.innerHTML = '';
-  if (!state.logs.length) {
+  const filtered = state.logFilter === 'todos'
+    ? state.logs
+    : state.logs.filter((log) => (log.metadata?.category || 'sistema') === state.logFilter);
+  if (!filtered.length) {
     const empty = document.createElement('div');
     empty.className = 'log-item';
-    empty.innerHTML = '<strong>Nenhum log ainda</strong><small>Os eventos do bot vao aparecer aqui.</small>';
+    empty.innerHTML = '<strong>Nenhum log nesta categoria</strong><small>Os eventos do bot vao aparecer aqui.</small>';
     list.appendChild(empty);
     return;
   }
-  state.logs.forEach((log) => {
+  filtered.forEach((log) => {
     const node = document.createElement('div');
     node.className = 'log-item';
     node.innerHTML = '<strong></strong><small></small><p></p>';
-    node.querySelector('strong').textContent = log.event_type;
+    node.querySelector('strong').textContent = `[${log.metadata?.category || 'sistema'}] ${log.event_type}`;
     node.querySelector('small').textContent = new Date(log.created_at).toLocaleString('pt-BR');
     node.querySelector('p').textContent = log.message || JSON.stringify(log.metadata || {});
     list.appendChild(node);
@@ -331,14 +336,16 @@ function parseProductVariations() {
 
 function renderPayment() {
   const payment = state.payment || {};
-  if ($('paymentProvider')) $('paymentProvider').value = payment.provider || 'aurora';
+  if ($('paymentProvider')) $('paymentProvider').value = payment.provider || 'pix';
   if ($('checkoutMode')) $('checkoutMode').value = payment.checkout_mode || 'ticket';
   if ($('receiverName')) $('receiverName').value = payment.receiver_name || '';
   if ($('publicPaymentInstructions')) $('publicPaymentInstructions').value = payment.public_instructions || '';
+  if ($('paymentTerms')) $('paymentTerms').value = payment.terms_text || '';
+  if ($('pixCity')) $('pixCity').value = payment.pix_city || 'SAO PAULO';
   if ($('privatePaymentDetails')) $('privatePaymentDetails').value = '';
   if ($('paymentStatus')) {
-    const labels = { aurora: 'Aurora Pay interno', pix: 'Pix/manual', external: 'Link externo', manual: 'Manual' };
-    const method = labels[payment.provider] || 'Aurora Pay interno';
+    const labels = { pix: 'Pix automatico', aurora: 'Aurora Pay interno', external: 'Link externo', manual: 'Manual' };
+    const method = labels[payment.provider] || 'Pix automatico';
     $('paymentStatus').textContent = payment.has_private_details
       ? `${method} salvo. Dado privado: ${payment.private_details_preview || 'criptografado'}`
       : `${method} salvo. Nenhum dado privado cadastrado.`;
@@ -357,20 +364,20 @@ function renderProductMode() {
 }
 
 function renderPaymentMode() {
-  const provider = $('paymentProvider')?.value || 'aurora';
+  const provider = $('paymentProvider')?.value || 'pix';
   if ($('checkoutMode')) $('checkoutMode').value = provider === 'external' ? 'external' : 'ticket';
   if ($('privatePaymentDetails')) {
     $('privatePaymentDetails').placeholder = provider === 'external'
       ? 'Token interno/observacao privada opcional'
       : provider === 'pix'
-        ? 'Chave Pix opcional - fica criptografada'
+        ? 'Cole a chave Pix que vai gerar o QR Code'
         : 'Observacao privada opcional - fica criptografada';
   }
   if ($('publicPaymentInstructions')) {
     $('publicPaymentInstructions').placeholder = provider === 'external'
       ? 'Cole aqui o link de pagamento externo e as instrucoes para o comprador.'
       : provider === 'pix'
-        ? 'Ex: Envie o comprovante aqui no ticket apos pagar no Pix.'
+        ? 'Ex: Pague o Pix e envie o comprovante no carrinho.'
         : 'Ex: O pedido sera criado no Aurora Pay. Aguarde o suporte conferir e aprovar.';
   }
 }
@@ -564,6 +571,8 @@ async function savePayment() {
       checkout_mode: $('checkoutMode').value,
       receiver_name: $('receiverName').value,
       public_instructions: $('publicPaymentInstructions').value,
+      terms_text: $('paymentTerms').value,
+      pix_city: $('pixCity').value,
       private_details: $('privatePaymentDetails').value
     })
   });
@@ -621,6 +630,14 @@ function bind() {
   $('paymentProvider').onchange = renderPaymentMode;
   $('savePayment').onclick = () => savePayment().catch((error) => msg(error.message, true));
   $('reloadLogs').onclick = () => loadLogs().catch((error) => msg(error.message, true));
+  document.querySelectorAll('[data-log-filter]').forEach((button) => {
+    button.onclick = () => {
+      document.querySelectorAll('[data-log-filter]').forEach((item) => item.classList.remove('active'));
+      button.classList.add('active');
+      state.logFilter = button.dataset.logFilter || 'todos';
+      renderLogs();
+    };
+  });
   $('uploadEmoji').onclick = () => uploadEmoji().catch((error) => msg(error.message, true));
   ids.forEach((id) => {
     const node = $(id);

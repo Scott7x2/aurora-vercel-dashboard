@@ -143,6 +143,8 @@
           <div class="head"><div><h2>Tickets privados</h2><p>Topico privado para membro, dono e suporte.</p></div></div>
           <div class="config-preview-row">
             <div class="setting-card">
+              <h3>Painel publico de ticket</h3>
+              <p class="muted">Essa e a mensagem que aparece no canal com o botao para abrir ticket.</p>
               <div class="grid">
                 <label><span>Canal base</span><select id="ticket_channel_id" data-kind="channel"></select></label>
                 <label><span>Cargos suporte</span><select id="support_role_ids" data-kind="role" multiple size="5"></select></label>
@@ -155,6 +157,23 @@
             <div class="preview-rail">
               <div id="ticket_preview" class="message-preview"></div>
               <label><span>Cor ticket</span><input id="ticket_color" type="color"></label>
+            </div>
+          </div>
+
+          <div class="config-preview-row">
+            <div class="setting-card">
+              <h3>Mensagem dentro do ticket</h3>
+              <p class="muted">Essa mensagem e enviada automaticamente dentro do topico privado assim que o usuario abre atendimento ou compra.</p>
+              <div class="grid">
+                <label><span>Titulo atendimento</span><input id="ticket_open_title" placeholder="Novo atendimento de {user}"></label>
+                <label><span>Titulo compra</span><input id="ticket_open_purchase_title" placeholder="Novo pedido de {user}"></label>
+              </div>
+              <label><span>Mensagem atendimento</span><textarea id="ticket_open_message" rows="5" placeholder="Ola {user}, obrigado por abrir um ticket."></textarea></label>
+              <label><span>Mensagem compra</span><textarea id="ticket_open_purchase_message" rows="6" placeholder="Produto: {product}&#10;Preco: {price}&#10;Aguarde o suporte aprovar."></textarea></label>
+            </div>
+            <div class="preview-rail">
+              <div id="ticket_open_preview" class="message-preview"></div>
+              <label><span>Cor mensagem interna</span><input id="ticket_open_color" type="color"></label>
             </div>
           </div>
         </section>
@@ -178,15 +197,17 @@
           <div class="payment-card">
             <div>
               <h3>Pagamento</h3>
-              <p>Escolha um fluxo simples. O recomendado e Aurora Pay: ele cria um pedido interno com ID, organiza o ticket, registra logs e evita expor dados sensiveis no site.</p>
+              <p>O carrinho gera termos, pedido, Pix copia-e-cola e QR Code automaticamente. A chave Pix fica criptografada no banco.</p>
             </div>
             <div class="grid">
-              <label><span>Metodo</span><select id="paymentProvider"><option value="aurora">Aurora Pay interno recomendado</option><option value="pix">Pix/manual no ticket</option><option value="external">Link de pagamento externo</option></select></label>
-              <label><span>Fluxo</span><select id="checkoutMode"><option value="ticket">Criar pedido + ticket</option><option value="external">Enviar link externo</option></select></label>
+              <label><span>Metodo</span><select id="paymentProvider"><option value="pix">Pix automatico com QR Code</option><option value="aurora">Aurora Pay interno</option><option value="external">Link de pagamento externo</option></select></label>
+              <label><span>Fluxo</span><select id="checkoutMode"><option value="ticket">Carrinho + termos + Pix</option><option value="external">Enviar link externo</option></select></label>
               <label><span>Nome do recebedor</span><input id="receiverName" placeholder="Nome da loja ou recebedor"></label>
-              <label><span>Dado privado criptografado</span><input id="privatePaymentDetails" type="password" placeholder="Chave Pix ou observacao privada opcional"></label>
+              <label><span>Cidade Pix</span><input id="pixCity" placeholder="SAO PAULO"></label>
+              <label><span>Chave Pix criptografada</span><input id="privatePaymentDetails" type="password" placeholder="CPF, CNPJ, email, telefone ou chave aleatoria"></label>
             </div>
-            <label><span>Texto que aparece no ticket</span><textarea id="publicPaymentInstructions" rows="3" placeholder="Ex: Envie o comprovante aqui no ticket. Se usar link externo, cole o link aqui."></textarea></label>
+            <label><span>Instrucoes que aparecem junto ao pagamento</span><textarea id="publicPaymentInstructions" rows="3" placeholder="Ex: Pague o Pix e envie o comprovante no carrinho."></textarea></label>
+            <label><span>Termos antes de gerar Pix</span><textarea id="paymentTerms" rows="4" placeholder="Ex: Ao confirmar, voce aceita os termos da compra e entende que a entrega ocorre apos aprovacao."></textarea></label>
             <div class="actions">
               <button id="savePayment" class="primary">Salvar pagamento</button>
               <small id="paymentStatus">Nenhum recebimento configurado.</small>
@@ -256,6 +277,14 @@
           <div class="saved-help">
             <strong>Eventos registrados</strong>
             <p>Entradas, saidas, mensagens apagadas, carrinhos/tickets criados, tickets fechados, compras aprovadas, estoque baixo/acabando e avaliacoes.</p>
+          </div>
+          <div class="log-filters">
+            <button type="button" class="active" data-log-filter="todos">Todos</button>
+            <button type="button" data-log-filter="entrada">Entrada</button>
+            <button type="button" data-log-filter="tickets">Tickets</button>
+            <button type="button" data-log-filter="vendas">Vendas</button>
+            <button type="button" data-log-filter="mensagens">Mensagens</button>
+            <button type="button" data-log-filter="sistema">Sistema</button>
           </div>
           <div id="logsList" class="logs-list"></div>
         </section>

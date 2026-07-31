@@ -198,6 +198,8 @@ function publicPayment(row) {
       checkout_mode: 'ticket',
       receiver_name: '',
       public_instructions: '',
+      terms_text: 'Ao confirmar, voce declara que revisou os produtos, valores e entende que a entrega ocorre apos aprovacao do pagamento.',
+      pix_city: 'SAO PAULO',
       has_private_details: false,
       private_details_preview: ''
     };
@@ -215,6 +217,8 @@ function publicPayment(row) {
     checkout_mode: row.checkout_mode || 'ticket',
     receiver_name: row.receiver_name || '',
     public_instructions: row.public_instructions || '',
+    terms_text: row.terms_text || 'Ao confirmar, voce declara que revisou os produtos, valores e entende que a entrega ocorre apos aprovacao do pagamento.',
+    pix_city: row.pix_city || 'SAO PAULO',
     has_private_details: Boolean(row.private_details_encrypted),
     private_details_preview: preview
   };
@@ -349,7 +353,19 @@ async function getInstance(id, ownerDiscordId) {
   return one('select * from bot_instances where id = $1 and owner_discord_id = $2', [id, ownerDiscordId]);
 }
 
+async function ensureSettingsSchema() {
+  await query(`
+    alter table bot_settings
+      add column if not exists ticket_open_color text not null default '#5865f2',
+      add column if not exists ticket_open_title text not null default 'Novo atendimento de {user}',
+      add column if not exists ticket_open_message text not null default 'Ola {user}, obrigado por abrir um ticket.\n\nExplique aqui o que voce precisa e aguarde o suporte. {supportRoleMentions}',
+      add column if not exists ticket_open_purchase_title text not null default 'Novo pedido de {user}',
+      add column if not exists ticket_open_purchase_message text not null default 'ID do pedido: **gerando**\nProduto: **{product}**\nPreco: **{price}**\n\nAguarde o suporte aprovar sua compra.'
+  `);
+}
+
 async function ensureSettings(instanceId) {
+  await ensureSettingsSchema();
   await query('insert into bot_settings (bot_instance_id) values ($1) on conflict (bot_instance_id) do nothing', [instanceId]);
   return one('select * from bot_settings where bot_instance_id = $1', [instanceId]);
 }
@@ -379,6 +395,11 @@ async function ensureCommerceSchema() {
       private_details_encrypted text,
       updated_at timestamptz not null default now()
     )
+  `);
+  await query(`
+    alter table payment_settings
+      add column if not exists terms_text text not null default 'Ao confirmar, voce declara que revisou os produtos, valores e entende que a entrega ocorre apos aprovacao do pagamento.',
+      add column if not exists pix_city text not null default 'SAO PAULO'
   `);
   await query("alter table payment_settings alter column provider set default 'aurora'");
   await query(`
@@ -636,6 +657,7 @@ app.put('/api/instances/:id/settings', async (req, res, next) => {
     if (!user) return;
     const instance = await getInstance(req.params.id, user.discord_id);
     if (!instance) return res.status(404).json({ error: 'not_found' });
+    await ensureSettingsSchema();
     const body = req.body || {};
     const values = [
       instance.id,
@@ -662,6 +684,11 @@ app.put('/api/instances/:id/settings', async (req, res, next) => {
       text(body.ticket_title || 'Atendimento', 100),
       text(body.ticket_message || '', 1500),
       text(body.ticket_button_label || 'Abrir ticket', 80),
+      hexColor(body.ticket_open_color, hexColor(body.ticket_color, hexColor(body.brand_color))),
+      text(body.ticket_open_title || 'Novo atendimento de {user}', 100),
+      text(body.ticket_open_message || '', 2500),
+      text(body.ticket_open_purchase_title || 'Novo pedido de {user}', 100),
+      text(body.ticket_open_purchase_message || '', 2500),
       snowflake(body.sales_channel_id),
       messageMode(body.sales_mode),
       hexColor(body.sales_color, hexColor(body.brand_color)),
@@ -686,11 +713,12 @@ app.put('/api/instances/:id/settings', async (req, res, next) => {
         welcome_channel_id,welcome_mode,welcome_color,welcome_title,welcome_message,
         auth_channel_id,auth_mode,auth_color,auth_title,auth_message,auth_button_label,
         ticket_channel_id,support_role_ids,ticket_mode,ticket_color,ticket_title,ticket_message,ticket_button_label,
+        ticket_open_color,ticket_open_title,ticket_open_message,ticket_open_purchase_title,ticket_open_purchase_message,
         sales_channel_id,sales_mode,sales_color,sales_title,sales_message,
         delivery_mode,delivery_title,delivery_message,delivery_color,
         review_channel_id,review_title,review_message,review_color,review_gif_url,
         log_channel_id,stock_warn_threshold,button_emoji,updated_at
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,now())
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,now())
       on conflict (bot_instance_id) do update set
         brand_name=excluded.brand_name, brand_color=excluded.brand_color, auto_role_id=excluded.auto_role_id,
         verified_role_id=excluded.verified_role_id, remove_auto_role_after_verify=excluded.remove_auto_role_after_verify,
@@ -701,7 +729,11 @@ app.put('/api/instances/:id/settings', async (req, res, next) => {
         auth_button_label=excluded.auth_button_label, ticket_channel_id=excluded.ticket_channel_id,
         support_role_ids=excluded.support_role_ids, ticket_mode=excluded.ticket_mode, ticket_color=excluded.ticket_color,
         ticket_title=excluded.ticket_title, ticket_message=excluded.ticket_message,
-        ticket_button_label=excluded.ticket_button_label, sales_channel_id=excluded.sales_channel_id,
+        ticket_button_label=excluded.ticket_button_label,
+        ticket_open_color=excluded.ticket_open_color, ticket_open_title=excluded.ticket_open_title,
+        ticket_open_message=excluded.ticket_open_message, ticket_open_purchase_title=excluded.ticket_open_purchase_title,
+        ticket_open_purchase_message=excluded.ticket_open_purchase_message,
+        sales_channel_id=excluded.sales_channel_id,
         sales_mode=excluded.sales_mode, sales_color=excluded.sales_color, sales_title=excluded.sales_title,
         sales_message=excluded.sales_message, delivery_mode=excluded.delivery_mode,
         delivery_title=excluded.delivery_title, delivery_message=excluded.delivery_message,
@@ -808,14 +840,16 @@ app.put('/api/instances/:id/payment', async (req, res, next) => {
     const encryptedPrivate = rawPrivate ? encrypt(rawPrivate) : existing.private_details_encrypted;
     const saved = await one(`
       insert into payment_settings (
-        bot_instance_id,provider,checkout_mode,receiver_name,public_instructions,private_details_encrypted,updated_at
-      ) values ($1,$2,$3,$4,$5,$6,now())
+        bot_instance_id,provider,checkout_mode,receiver_name,public_instructions,private_details_encrypted,terms_text,pix_city,updated_at
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,now())
       on conflict (bot_instance_id) do update set
         provider=excluded.provider,
         checkout_mode=excluded.checkout_mode,
         receiver_name=excluded.receiver_name,
         public_instructions=excluded.public_instructions,
         private_details_encrypted=excluded.private_details_encrypted,
+        terms_text=excluded.terms_text,
+        pix_city=excluded.pix_city,
         updated_at=now()
       returning *
     `, [
@@ -824,7 +858,9 @@ app.put('/api/instances/:id/payment', async (req, res, next) => {
       checkoutMode(body.checkout_mode),
       text(body.receiver_name, 120),
       text(body.public_instructions, 1500),
-      encryptedPrivate
+      encryptedPrivate,
+      text(body.terms_text || 'Ao confirmar, voce declara que revisou os produtos, valores e entende que a entrega ocorre apos aprovacao do pagamento.', 2500),
+      text(body.pix_city || 'SAO PAULO', 15)
     ]);
     res.json(publicPayment(saved));
   } catch (error) {

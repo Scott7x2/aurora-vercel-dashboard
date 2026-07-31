@@ -2,6 +2,7 @@ import 'dotenv/config';
 import crypto from 'node:crypto';
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
@@ -13,6 +14,7 @@ import {
   SlashCommandBuilder
 } from 'discord.js';
 import pg from 'pg';
+import QRCode from 'qrcode';
 
 const { Pool } = pg;
 const env = (name) => String(process.env[name] || '').trim();
@@ -98,6 +100,13 @@ function embed(settings, title, description, color) {
 
 function messageMode(value) {
   return value === 'simple' ? 'simple' : 'embed';
+}
+
+async function safeEphemeral(interaction, content) {
+  if (!interaction?.isRepliable?.()) return;
+  const payload = typeof content === 'string' ? { content } : content;
+  if (interaction.deferred || interaction.replied) return interaction.editReply(payload).catch(() => interaction.followUp({ ...payload, ephemeral: true }).catch(() => null));
+  return interaction.reply({ ...payload, ephemeral: true }).catch(() => null);
 }
 
 function roleName(guild, id) {
@@ -198,7 +207,92 @@ async function paymentSettings(instanceId) {
   return one('select * from payment_settings where bot_instance_id=$1', [instanceId]);
 }
 
+async function ensureRuntimeSchema() {
+  await query(`
+    alter table payment_settings
+      add column if not exists terms_text text not null default 'Ao confirmar, voce declara que revisou os produtos, valores e entende que a entrega ocorre apos aprovacao do pagamento.',
+      add column if not exists pix_city text not null default 'SAO PAULO'
+  `);
+  await query(`
+    alter table tickets
+      add column if not exists cart_message_id text,
+      add column if not exists terms_message_id text,
+      add column if not exists payment_message_id text,
+      add column if not exists cart_total_text text
+  `);
+  await query(`
+    create table if not exists cart_items (
+      id bigserial primary key,
+      thread_id text not null references tickets(thread_id) on delete cascade,
+      product_id bigint references products(id) on delete set null,
+      product_name text not null,
+      variant jsonb,
+      unit_price_text text not null default '',
+      quantity integer not null default 1,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `);
+}
+
+function eventCategory(type) {
+  if (/ticket/.test(type)) return 'tickets';
+  if (/cart|purchase|payment|stock|review/.test(type)) return 'vendas';
+  if (/auto_role|welcome|member|auth/.test(type)) return 'entrada';
+  if (/message/.test(type)) return 'mensagens';
+  return 'sistema';
+}
+
+function parseMoney(value) {
+  const raw = String(value || '').replace(/[^\d,.-]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
+  const number = Number.parseFloat(raw);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function formatBRL(value) {
+  return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function emv(id, value) {
+  const text = String(value ?? '');
+  return `${id}${String(text.length).padStart(2, '0')}${text}`;
+}
+
+function crc16(payload) {
+  let crc = 0xffff;
+  for (let i = 0; i < payload.length; i += 1) {
+    crc ^= payload.charCodeAt(i) << 8;
+    for (let j = 0; j < 8; j += 1) crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+  }
+  return crc.toString(16).toUpperCase().padStart(4, '0');
+}
+
+function pixPayload({ key: pixKey, amount, merchant = 'Aurora Store', city = 'SAO PAULO', txid = 'AURORA' }) {
+  const keyText = String(pixKey || '').trim();
+  if (!keyText) return null;
+  const merchantAccount = emv('00', 'br.gov.bcb.pix') + emv('01', keyText) + emv('02', String(txid || 'AURORA').slice(0, 50));
+  const base = [
+    emv('00', '01'),
+    emv('26', merchantAccount),
+    emv('52', '0000'),
+    emv('53', '986'),
+    amount > 0 ? emv('54', Number(amount).toFixed(2)) : '',
+    emv('58', 'BR'),
+    emv('59', String(merchant || 'Aurora Store').normalize('NFD').replace(/[\u0300-\u036f]/g, '').slice(0, 25).toUpperCase()),
+    emv('60', String(city || 'SAO PAULO').normalize('NFD').replace(/[\u0300-\u036f]/g, '').slice(0, 15).toUpperCase()),
+    emv('62', emv('05', String(txid || 'AURORA').slice(0, 25)))
+  ].join('');
+  const withCrc = `${base}6304`;
+  return `${withCrc}${crc16(withCrc)}`;
+}
+
+async function pixAttachment(payload) {
+  const buffer = await QRCode.toBuffer(payload, { type: 'png', width: 420, margin: 2, errorCorrectionLevel: 'M' });
+  return new AttachmentBuilder(buffer, { name: 'pix-aurora.png' });
+}
+
 async function logEvent(instance, settings, type, message, metadata = {}) {
+  const category = metadata.category || eventCategory(type);
   await query(`
     insert into bot_logs (bot_instance_id,guild_id,event_type,actor_id,target_id,channel_id,message,metadata)
     values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
@@ -210,14 +304,14 @@ async function logEvent(instance, settings, type, message, metadata = {}) {
     metadata.targetId || null,
     metadata.channelId || null,
     String(message || '').slice(0, 800),
-    JSON.stringify(metadata)
+    JSON.stringify({ ...metadata, category })
   ]).catch(console.error);
   if (!settings?.log_channel_id) return;
   const client = running.get(instance.id)?.client;
   const channel = client ? await client.channels.fetch(settings.log_channel_id).catch(() => null) : null;
   if (!channel?.isTextBased?.()) return;
   await channel.send({
-    embeds: [embed(settings, `Log: ${type}`, message || 'Evento registrado.', settings.brand_color)]
+    embeds: [embed(settings, `Log ${category}: ${type}`, message || 'Evento registrado.', settings.brand_color)]
   }).catch(() => null);
 }
 
@@ -363,6 +457,257 @@ function chosenPrice(item, variant = null) {
   return variant?.price || item?.price || '';
 }
 
+async function cartItems(threadId) {
+  return query('select * from cart_items where thread_id=$1 order by id asc', [threadId]);
+}
+
+function cartTotal(items) {
+  return items.reduce((sum, item) => sum + (parseMoney(item.unit_price_text) * Number(item.quantity || 1)), 0);
+}
+
+function cartLines(items) {
+  if (!items.length) return 'Carrinho vazio.';
+  return items.map((item, index) => {
+    const variant = item.variant?.name ? ` — ${item.variant.name}` : '';
+    const lineTotal = parseMoney(item.unit_price_text) * Number(item.quantity || 1);
+    return `**${index + 1}. ${item.product_name}${variant}**\nQtd: **${item.quantity}** • Unit: **${item.unit_price_text || 'R$ 0,00'}** • Total: **${formatBRL(lineTotal)}**`;
+  }).join('\n\n');
+}
+
+function cartComponents(settings, items) {
+  const rows = [];
+  items.slice(0, 3).forEach((item) => {
+    rows.push(row(
+      btn(`az:cart_minus:${item.id}`, `- ${String(item.product_name).slice(0, 18)}`, ButtonStyle.Secondary),
+      btn(`az:cart_plus:${item.id}`, `+ ${String(item.product_name).slice(0, 18)}`, ButtonStyle.Secondary)
+    ));
+  });
+  rows.push(row(
+    btn('az:cart_confirm', 'Confirmar compra', ButtonStyle.Success, '✅'),
+    btn('az:cart_clear', 'Limpar carrinho', ButtonStyle.Danger, settings.button_emoji)
+  ));
+  return rows;
+}
+
+async function findOpenCart(instance, interaction) {
+  return one(`
+    select * from tickets
+    where bot_instance_id=$1 and owner_id=$2 and status='cart'
+    order by created_at desc
+    limit 1
+  `, [instance.id, interaction.user.id]);
+}
+
+async function renderCart(thread, instance, settings, ticket) {
+  const items = await cartItems(thread.id);
+  const total = cartTotal(items);
+  const payload = {
+    embeds: [embed(
+      settings,
+      '🛒 Carrinho de compras',
+      `${cartLines(items)}\n\n**Total:** ${formatBRL(total)}\n\nUse os botões para aumentar/diminuir quantidades ou confirmar a compra.`,
+      settings.sales_color
+    )],
+    components: cartComponents(settings, items)
+  };
+  let message = ticket?.cart_message_id ? await thread.messages.fetch(ticket.cart_message_id).catch(() => null) : null;
+  if (message) await message.edit(payload).catch(() => null);
+  else {
+    message = await thread.send(payload);
+    await query('update tickets set cart_message_id=$1, cart_total_text=$2 where thread_id=$3', [message.id, formatBRL(total), thread.id]);
+  }
+  return { items, total, message };
+}
+
+async function createCartThread(interaction, instance, settings) {
+  const parent = await interaction.guild.channels.fetch(settings.ticket_channel_id || interaction.channelId).catch(() => null);
+  if (!parent?.isTextBased?.()) throw new Error('Canal base de tickets/carrinhos nao configurado.');
+  const thread = await parent.threads.create({
+    name: `carrinho-${interaction.user.username}`.slice(0, 95),
+    type: ChannelType.PrivateThread,
+    invitable: false
+  });
+  await addTicketMembers(thread, interaction, settings);
+  await query(`
+    insert into tickets (thread_id,bot_instance_id,guild_id,owner_id,status,purchase_status,closed_at)
+    values ($1,$2,$3,$4,'cart','cart',null)
+    on conflict (thread_id) do update set status='cart', purchase_status='cart', closed_at=null
+  `, [thread.id, instance.id, interaction.guildId, interaction.user.id]);
+  await thread.send(`${interaction.user} carrinho criado. Escolha mais produtos no painel ou ajuste a quantidade aqui.`).catch(() => null);
+  return thread;
+}
+
+async function addProductToCart(interaction, instance, productId, variantIndex = null) {
+  if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ ephemeral: true }).catch(() => null);
+  const settings = await getSettings(instance.id);
+  const item = await product(instance.id, productId);
+  if (!item) return safeEphemeral(interaction, 'Produto nao encontrado.');
+  const variant = item.product_type === 'variation' ? variationsOf(item)[Number(variantIndex)] : null;
+  if (item.product_type === 'variation' && !variant) return chooseVariation(interaction, instance, productId);
+
+  let ticket = await findOpenCart(instance, interaction);
+  let thread = ticket ? await interaction.guild.channels.fetch(ticket.thread_id).catch(() => null) : null;
+  if (!thread?.isThread?.()) {
+    thread = await createCartThread(interaction, instance, settings);
+    ticket = await one('select * from tickets where thread_id=$1', [thread.id]);
+  }
+  const variantJson = JSON.stringify(variant || null);
+  const existing = await one(`
+    select * from cart_items
+    where thread_id=$1 and product_id=$2 and coalesce(variant::text,'null')=$3
+    limit 1
+  `, [thread.id, item.id, variantJson]);
+  if (existing) {
+    await query('update cart_items set quantity=quantity+1, updated_at=now() where id=$1', [existing.id]);
+  } else {
+    await query(`
+      insert into cart_items (thread_id,product_id,product_name,variant,unit_price_text,quantity)
+      values ($1,$2,$3,$4::jsonb,$5,1)
+    `, [thread.id, item.id, item.name, variantJson, chosenPrice(item, variant)]);
+  }
+  await renderCart(thread, instance, settings, ticket);
+  await logEvent(instance, settings, 'cart_item_added', `${interaction.user.tag} adicionou ${item.name}${variant?.name ? ` (${variant.name})` : ''} ao carrinho`, {
+    actorId: interaction.user.id,
+    targetId: String(item.id),
+    channelId: thread.id,
+    category: 'vendas'
+  });
+  return safeEphemeral(interaction, `Adicionado ao carrinho: ${thread}`);
+}
+
+async function ticketForThread(instance, threadId) {
+  return one('select * from tickets where thread_id=$1 and bot_instance_id=$2', [threadId, instance.id]);
+}
+
+async function changeCartQuantity(interaction, instance, itemId, delta) {
+  if (!interaction.channel?.isThread?.()) return safeEphemeral(interaction, 'Use dentro do carrinho.');
+  const ticket = await ticketForThread(instance, interaction.channel.id);
+  if (!ticket || ticket.owner_id !== interaction.user.id || ticket.status !== 'cart') return safeEphemeral(interaction, 'Esse carrinho nao pertence a voce.');
+  const item = await one('select * from cart_items where id=$1 and thread_id=$2', [itemId, interaction.channel.id]);
+  if (!item) return safeEphemeral(interaction, 'Item nao encontrado no carrinho.');
+  if (delta < 0 && Number(item.quantity) <= 1) await query('delete from cart_items where id=$1', [item.id]);
+  else await query('update cart_items set quantity=greatest(quantity+$1,1), updated_at=now() where id=$2', [delta, item.id]);
+  const settings = await getSettings(instance.id);
+  await renderCart(interaction.channel, instance, settings, ticket);
+  return safeEphemeral(interaction, 'Carrinho atualizado.');
+}
+
+async function clearCart(interaction, instance) {
+  if (!interaction.channel?.isThread?.()) return safeEphemeral(interaction, 'Use dentro do carrinho.');
+  const ticket = await ticketForThread(instance, interaction.channel.id);
+  if (!ticket || ticket.owner_id !== interaction.user.id || ticket.status !== 'cart') return safeEphemeral(interaction, 'Esse carrinho nao pertence a voce.');
+  await query('delete from cart_items where thread_id=$1', [interaction.channel.id]);
+  const settings = await getSettings(instance.id);
+  await renderCart(interaction.channel, instance, settings, ticket);
+  await logEvent(instance, settings, 'cart_cleared', `${interaction.user.tag} limpou o carrinho`, {
+    actorId: interaction.user.id,
+    channelId: interaction.channel.id,
+    category: 'vendas'
+  });
+  return safeEphemeral(interaction, 'Carrinho limpo.');
+}
+
+async function confirmCart(interaction, instance) {
+  if (!interaction.channel?.isThread?.()) return safeEphemeral(interaction, 'Use dentro do carrinho.');
+  const ticket = await ticketForThread(instance, interaction.channel.id);
+  if (!ticket || ticket.owner_id !== interaction.user.id || ticket.status !== 'cart') return safeEphemeral(interaction, 'Esse carrinho nao pertence a voce.');
+  const settings = await getSettings(instance.id);
+  const payment = await paymentSettings(instance.id);
+  const items = await cartItems(interaction.channel.id);
+  if (!items.length) return safeEphemeral(interaction, 'Adicione pelo menos um produto antes de confirmar.');
+  const total = cartTotal(items);
+  const terms = payment?.terms_text || 'Ao confirmar, voce declara que revisou os produtos, valores e entende que a entrega ocorre apos aprovacao do pagamento.';
+  const payload = {
+    embeds: [embed(settings, '📜 Termos da compra', `${terms}\n\n**Resumo:**\n${cartLines(items)}\n\n**Total:** ${formatBRL(total)}\n\nClique em **Aceitar termos e gerar Pix** para continuar.`, settings.sales_color)],
+    components: [row(
+      btn('az:terms_accept', 'Aceitar termos e gerar Pix', ButtonStyle.Success, '✅'),
+      btn('az:cart_clear', 'Cancelar compra', ButtonStyle.Danger)
+    )]
+  };
+  let message = ticket.terms_message_id ? await interaction.channel.messages.fetch(ticket.terms_message_id).catch(() => null) : null;
+  if (message) await message.edit(payload).catch(() => null);
+  else {
+    message = await interaction.channel.send(payload);
+    await query("update tickets set terms_message_id=$1, purchase_status='terms' where thread_id=$2", [message.id, interaction.channel.id]);
+  }
+  await logEvent(instance, settings, 'cart_confirmed', `${interaction.user.tag} confirmou o carrinho e recebeu os termos`, {
+    actorId: interaction.user.id,
+    channelId: interaction.channel.id,
+    total: formatBRL(total),
+    category: 'vendas'
+  });
+  return safeEphemeral(interaction, 'Termos enviados no carrinho.');
+}
+
+async function generateCartPayment(interaction, instance) {
+  if (!interaction.channel?.isThread?.()) return safeEphemeral(interaction, 'Use dentro do carrinho.');
+  const ticket = await ticketForThread(instance, interaction.channel.id);
+  if (!ticket || ticket.owner_id !== interaction.user.id) return safeEphemeral(interaction, 'Esse carrinho nao pertence a voce.');
+  const settings = await getSettings(instance.id);
+  const payment = await paymentSettings(instance.id);
+  const items = await cartItems(interaction.channel.id);
+  if (!items.length) return safeEphemeral(interaction, 'Carrinho vazio.');
+  const total = cartTotal(items);
+  let pixKey = '';
+  if (payment?.private_details_encrypted) {
+    try { pixKey = decrypt(payment.private_details_encrypted); } catch {}
+  }
+  if (!pixKey) return safeEphemeral(interaction, 'O dono ainda nao configurou a chave Pix no site.');
+  const order = await one(`
+    insert into payment_orders (
+      bot_instance_id,ticket_thread_id,guild_id,buyer_id,product_name,product_variant,amount_text,provider,status
+    ) values ($1,$2,$3,$4,'Carrinho',$5::jsonb,$6,$7,'pending')
+    returning *
+  `, [
+    instance.id,
+    interaction.channel.id,
+    interaction.guildId,
+    interaction.user.id,
+    JSON.stringify(items.map((item) => ({
+      product_id: item.product_id,
+      product_name: item.product_name,
+      variant: item.variant,
+      unit_price_text: item.unit_price_text,
+      quantity: item.quantity
+    }))),
+    formatBRL(total),
+    payment?.provider || 'pix'
+  ]);
+  const txid = String(order.id).replace(/-/g, '').slice(0, 25);
+  const payload = pixPayload({
+    key: pixKey,
+    amount: total,
+    merchant: payment?.receiver_name || settings.brand_name || 'Aurora Store',
+    city: payment?.pix_city || 'SAO PAULO',
+    txid
+  });
+  if (!payload) return safeEphemeral(interaction, 'Chave Pix invalida ou ausente.');
+  const file = await pixAttachment(payload);
+  const paymentMessage = await interaction.channel.send({
+    embeds: [embed(
+      settings,
+      '💠 Pix gerado automaticamente',
+      `**Pedido:** ${order.id}\n**Total:** ${formatBRL(total)}\n\nEscaneie o QR Code ou copie o Pix abaixo:\n\n\`\`\`${payload}\`\`\`\n\nDepois de pagar, envie o comprovante aqui. O suporte pode clicar em **Aprovar compra**.`,
+      settings.sales_color
+    ).setImage('attachment://pix-aurora.png')],
+    files: [file],
+    components: [row(btn('az:approve', 'Aprovar compra', ButtonStyle.Success, '✅'), btn('az:close', 'Fechar carrinho', ButtonStyle.Danger))]
+  });
+  await query(`
+    update tickets
+    set payment_order_id=$1, payment_message_id=$2, purchase_status='payment_pending', status='payment_pending', cart_total_text=$3
+    where thread_id=$4
+  `, [order.id, paymentMessage.id, formatBRL(total), interaction.channel.id]);
+  await logEvent(instance, settings, 'payment_pix_generated', `Pix gerado para ${interaction.user.tag}: ${formatBRL(total)}`, {
+    actorId: interaction.user.id,
+    channelId: interaction.channel.id,
+    targetId: order.id,
+    total: formatBRL(total),
+    category: 'vendas'
+  });
+  return safeEphemeral(interaction, 'Pix gerado no carrinho.');
+}
+
 function paymentText(payment) {
   if (!payment) return 'Pagamento: combine os detalhes com o suporte neste ticket.';
   const lines = [];
@@ -464,7 +809,9 @@ async function panel(instanceId, type, context = {}) {
     mode: settings.sales_mode,
     color: settings.sales_color,
     title: settings.sales_title,
-    description: settings.sales_message,
+    description: items.length
+      ? settings.sales_message
+      : `${settings.sales_message || 'Escolha um produto para iniciar sua compra.'}\n\nNenhum produto ativo cadastrado ainda. Cadastre produtos no site e publique novamente.`,
     context,
     components: rows
   });
@@ -485,26 +832,28 @@ async function addTicketMembers(thread, interaction, settings) {
 async function chooseVariation(interaction, instance, productId) {
   const settings = await getSettings(instance.id);
   const item = await product(instance.id, productId);
-  if (!item) return interaction.reply({ content: 'Produto nao encontrado.', ephemeral: true });
+  if (!item) return safeEphemeral(interaction, 'Produto nao encontrado.');
   const variations = variationsOf(item);
-  if (!variations.length) return openTicket(interaction, instance, productId);
+  if (!variations.length) return addProductToCart(interaction, instance, productId);
   const rows = [];
   variations.slice(0, 25).forEach((variant, index) => {
     const n = Math.floor(index / 5);
     rows[n] ||= new ActionRowBuilder();
     rows[n].addComponents(btn(`az:variant:${item.id}:${index}`, `${variant.name} - ${variant.price}`, ButtonStyle.Primary, settings.button_emoji));
   });
-  return interaction.reply({
+  return safeEphemeral(interaction, {
     content: `Escolha uma variacao de **${item.name}** para continuar a compra:`,
-    components: rows,
-    ephemeral: true
+    components: rows
   });
 }
 
 async function openTicket(interaction, instance, productId = null, variantIndex = null) {
+  if (!interaction.deferred && !interaction.replied) {
+    await interaction.deferReply({ ephemeral: true }).catch(() => null);
+  }
   const settings = await getSettings(instance.id);
   const parent = await interaction.guild.channels.fetch(settings.ticket_channel_id || interaction.channelId).catch(() => null);
-  if (!parent?.isTextBased?.()) return interaction.reply({ content: 'Canal base de tickets nao configurado.', ephemeral: true });
+  if (!parent?.isTextBased?.()) return safeEphemeral(interaction, 'Canal base de tickets nao configurado.');
   const item = productId ? await product(instance.id, productId) : null;
   const variant = item && variantIndex !== null ? variationsOf(item)[Number(variantIndex)] || null : null;
   if (item?.product_type === 'variation' && !variant) return chooseVariation(interaction, instance, productId);
@@ -542,15 +891,19 @@ async function openTicket(interaction, instance, productId = null, variantIndex 
   if (order) await query('update tickets set payment_order_id=$1 where thread_id=$2', [order.id, thread.id]);
   const mentions = (settings.support_role_ids || []).map((id) => `<@&${id}>`).join(' ');
   const ticketContext = { interaction, settings, product: item, variant, thread };
+  const openTitle = item
+    ? (settings.ticket_open_purchase_title || 'Novo pedido de {user}')
+    : (settings.ticket_open_title || 'Novo atendimento de {user}');
+  const openMessage = item
+    ? (settings.ticket_open_purchase_message || `ID do pedido: **${order?.id || 'gerando'}**\nProduto: **{product}**\n${variant ? 'Variacao: **{variation}**\n' : ''}Preco: **${chosenPrice(item, variant)}**\n{productDescription}${variant?.description ? '\n{variationDescription}' : ''}\n\n${paymentText(payment)}\n\nAguarde o suporte aprovar sua compra.`)
+    : (settings.ticket_open_message || 'Ola {user}, obrigado por abrir um ticket.\n\nExplique aqui o que voce precisa e aguarde o suporte. {supportRoleMentions}');
   await thread.send({
     content: `${interaction.user} ${mentions}`.trim(),
     embeds: [embed(
       settings,
-      renderTemplate(item ? 'Novo pedido de {user}' : 'Novo ticket de {user}', ticketContext),
-      item
-        ? renderTemplate(`ID do pedido: **${order?.id || 'gerando'}**\nProduto: **{product}**\n${variant ? 'Variacao: **{variation}**\n' : ''}Preco: **${chosenPrice(item, variant)}**\n{productDescription}${variant?.description ? '\n{variationDescription}' : ''}\n\n${paymentText(payment)}`, ticketContext)
-        : renderTemplate('Ola {user}, descreva o atendimento. {supportRoleMentions}', ticketContext),
-      settings.ticket_color
+      renderTemplate(openTitle, ticketContext),
+      renderTemplate(openMessage, ticketContext),
+      settings.ticket_open_color || settings.ticket_color
     )],
     components: item
       ? [row(btn('az:approve', 'Aprovar compra', ButtonStyle.Success, '✅'), btn('az:close', 'Fechar ticket', ButtonStyle.Danger, settings.button_emoji))]
@@ -563,7 +916,7 @@ async function openTicket(interaction, instance, productId = null, variantIndex 
     product: item?.name,
     variant
   });
-  return interaction.reply({ content: `Ticket criado: ${thread}`, ephemeral: true });
+  return safeEphemeral(interaction, `Ticket criado: ${thread}`);
 }
 
 function isSupportOrManager(interaction, settings, ticket) {
@@ -574,30 +927,53 @@ function isSupportOrManager(interaction, settings, ticket) {
 }
 
 async function approvePurchase(interaction, instance) {
-  if (!interaction.channel?.isThread?.()) return interaction.reply({ content: 'Use dentro de um ticket de compra.', ephemeral: true });
+  if (!interaction.channel?.isThread?.()) return safeEphemeral(interaction, 'Use dentro de um ticket/carrinho de compra.');
   const settings = await getSettings(instance.id);
   const ticket = await one('select * from tickets where thread_id=$1 and bot_instance_id=$2', [interaction.channel.id, instance.id]);
-  if (!ticket?.product_id) return interaction.reply({ content: 'Esse ticket nao possui produto vinculado.', ephemeral: true });
-  if (!isSupportOrManager(interaction, settings, ticket)) return interaction.reply({ content: 'Apenas suporte ou gerencia pode aprovar.', ephemeral: true });
-  if (ticket.purchase_status === 'approved') return interaction.reply({ content: 'Essa compra ja foi aprovada.', ephemeral: true });
+  if (!ticket) return safeEphemeral(interaction, 'Compra nao encontrada.');
+  if (!isSupportOrManager(interaction, settings, ticket)) return safeEphemeral(interaction, 'Apenas suporte ou gerencia pode aprovar.');
+  if (ticket.purchase_status === 'approved') return safeEphemeral(interaction, 'Essa compra ja foi aprovada.');
 
-  const item = await product(instance.id, ticket.product_id);
-  const variant = ticket.product_variant || null;
-  if (!item) return interaction.reply({ content: 'Produto nao encontrado.', ephemeral: true });
+  const items = await cartItems(ticket.thread_id);
+  if (!items.length && !ticket.product_id) return safeEphemeral(interaction, 'Esse carrinho nao possui produtos.');
+  const legacyItem = ticket.product_id ? await product(instance.id, ticket.product_id) : null;
+  const approvalItems = items.length ? items : [{
+    product_id: legacyItem?.id,
+    product_name: legacyItem?.name || 'Produto',
+    variant: ticket.product_variant,
+    unit_price_text: chosenPrice(legacyItem, ticket.product_variant),
+    quantity: 1
+  }];
 
-  let updatedProduct = item;
-  if (item.stock !== null && item.stock !== undefined) {
-    if (Number(item.stock) <= 0) return interaction.reply({ content: 'Estoque esgotado para esse produto.', ephemeral: true });
-    updatedProduct = await one('update products set stock = greatest(stock - 1, 0) where id=$1 and bot_instance_id=$2 returning *', [item.id, instance.id]) || item;
+  const deliveryParts = [];
+  for (const cartItem of approvalItems) {
+    const item = await product(instance.id, cartItem.product_id);
+    if (item?.stock !== null && item?.stock !== undefined) {
+      if (Number(item.stock) < Number(cartItem.quantity || 1)) return safeEphemeral(interaction, `Estoque insuficiente para ${item.name}.`);
+      const updatedProduct = await one('update products set stock = greatest(stock - $1, 0) where id=$2 and bot_instance_id=$3 returning *', [Number(cartItem.quantity || 1), item.id, instance.id]) || item;
+      const threshold = Number(settings.stock_warn_threshold ?? 3);
+      if (updatedProduct.stock !== null && updatedProduct.stock !== undefined && Number(updatedProduct.stock) <= threshold) {
+        await logEvent(instance, settings, Number(updatedProduct.stock) <= 0 ? 'stock_empty' : 'stock_low', `Estoque de ${item.name}: ${updatedProduct.stock}`, {
+          targetId: String(item.id),
+          product: item.name,
+          stock: updatedProduct.stock,
+          category: 'vendas'
+        });
+      }
+    }
+    if (settings.delivery_mode === 'auto') {
+      deliveryParts.push(`**${cartItem.product_name}${cartItem.variant?.name ? ` — ${cartItem.variant.name}` : ''} x${cartItem.quantity || 1}**\n${item?.delivery_content || 'Sem conteudo de entrega automatica cadastrado.'}`);
+    }
   }
 
-  await query("update tickets set purchase_status='approved', approved_at=now() where thread_id=$1", [ticket.thread_id]);
+  await query("update tickets set purchase_status='approved', status='approved', approved_at=now() where thread_id=$1", [ticket.thread_id]);
   if (ticket.payment_order_id) {
     await query("update payment_orders set status='approved', approved_at=now() where id=$1 and bot_instance_id=$2", [ticket.payment_order_id, instance.id]);
   }
   const buyer = await interaction.client.users.fetch(ticket.owner_id).catch(() => null);
-  const deliveryContent = settings.delivery_mode === 'auto' ? (item.delivery_content || 'Entrega automatica configurada, mas esse produto nao possui conteudo salvo.') : '';
-  const context = { interaction, settings, product: item, variant, deliveryContent };
+  const deliveryContent = deliveryParts.join('\n\n');
+  const firstProduct = { name: approvalItems[0]?.product_name || 'Carrinho', price: ticket.cart_total_text || '' };
+  const context = { interaction, settings, product: firstProduct, variant: approvalItems[0]?.variant, deliveryContent };
   const deliveryBody = settings.delivery_mode === 'auto'
     ? `${settings.delivery_message || ''}\n\n${deliveryContent ? `**Seus produtos:**\n${deliveryContent}` : ''}`
     : settings.delivery_message || 'Sua compra foi aprovada. O suporte enviara sua entrega em breve.';
@@ -615,26 +991,17 @@ async function approvePurchase(interaction, instance) {
     }).catch(() => null);
   }
 
-  await logEvent(instance, settings, 'purchase_approved', `Compra aprovada: ${item.name} para <@${ticket.owner_id}>`, {
+  await logEvent(instance, settings, 'purchase_approved', `Compra aprovada para <@${ticket.owner_id}>: ${approvalItems.map((item) => `${item.product_name} x${item.quantity || 1}`).join(', ')}`, {
     actorId: interaction.user.id,
     targetId: ticket.owner_id,
     channelId: interaction.channel.id,
-    product: item.name,
-    variant,
-    stock: updatedProduct.stock
+    items: approvalItems,
+    category: 'vendas'
   });
 
-  const threshold = Number(settings.stock_warn_threshold ?? 3);
-  if (updatedProduct.stock !== null && updatedProduct.stock !== undefined && Number(updatedProduct.stock) <= threshold) {
-    await logEvent(instance, settings, Number(updatedProduct.stock) <= 0 ? 'stock_empty' : 'stock_low', `Estoque de ${item.name}: ${updatedProduct.stock}`, {
-      targetId: String(item.id),
-      product: item.name,
-      stock: updatedProduct.stock
-    });
-  }
-
-  await interaction.reply({ content: 'Compra aprovada. Entrega enviada no privado e avaliacao liberada.', ephemeral: true });
-  await interaction.channel.send(`✅ Compra aprovada por ${interaction.user}. Entrega enviada para <@${ticket.owner_id}>.`).catch(() => null);
+  await safeEphemeral(interaction, 'Compra aprovada. Entrega enviada no privado e avaliacao liberada.');
+  await interaction.channel.send(`✅ Compra aprovada por ${interaction.user}. Entrega enviada para <@${ticket.owner_id}>. Este carrinho sera fechado em 5 segundos.`).catch(() => null);
+  setTimeout(() => interaction.channel.setArchived(true, 'Compra aprovada no Aurora').catch(() => null), 5000);
 }
 
 async function submitReview(interaction, instance, threadId, rating) {
@@ -694,7 +1061,6 @@ async function handle(interaction, instance) {
     const type = interaction.options.getString('tipo', true);
     const channel = interaction.options.getChannel('canal', true);
     const payload = await panel(instance.id, type, { interaction, channel });
-    if (type === 'sales' && !payload.components.length) return interaction.reply({ content: 'Cadastre produtos no site antes de publicar.', ephemeral: true });
     await channel.send(payload);
     return interaction.reply({ content: `Painel publicado em ${channel}.`, ephemeral: true });
   }
@@ -721,7 +1087,12 @@ async function handle(interaction, instance) {
   }
   if (action === 'ticket') return openTicket(interaction, instance);
   if (action === 'buy') return chooseVariation(interaction, instance, Number(value));
-  if (action === 'variant') return openTicket(interaction, instance, Number(value), Number(extra));
+  if (action === 'variant') return addProductToCart(interaction, instance, Number(value), Number(extra));
+  if (action === 'cart_plus') return changeCartQuantity(interaction, instance, Number(value), 1);
+  if (action === 'cart_minus') return changeCartQuantity(interaction, instance, Number(value), -1);
+  if (action === 'cart_clear') return clearCart(interaction, instance);
+  if (action === 'cart_confirm') return confirmCart(interaction, instance);
+  if (action === 'terms_accept') return generateCartPayment(interaction, instance);
   if (action === 'approve') return approvePurchase(interaction, instance);
   if (action === 'close') return closeTicket(interaction, instance);
 }
@@ -860,5 +1231,6 @@ process.on('SIGTERM', () => shutdown('SIGTERM').catch((error) => {
 }));
 
 console.log(`[${runnerName}] Aurora Zero runner iniciado. Poll: ${pollInterval}ms.`);
+await ensureRuntimeSchema();
 await reconcile();
 setInterval(() => reconcile().catch((error) => console.error(error)), pollInterval);

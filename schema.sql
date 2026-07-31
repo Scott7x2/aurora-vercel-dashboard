@@ -60,6 +60,11 @@ create table if not exists bot_settings (
   ticket_title text not null default 'Atendimento',
   ticket_message text not null default 'Precisa de ajuda? Abra um ticket.',
   ticket_button_label text not null default 'Abrir ticket',
+  ticket_open_color text not null default '#5865f2',
+  ticket_open_title text not null default 'Novo atendimento de {user}',
+  ticket_open_message text not null default 'Ola {user}, obrigado por abrir um ticket.\n\nExplique aqui o que voce precisa e aguarde o suporte. {supportRoleMentions}',
+  ticket_open_purchase_title text not null default 'Novo pedido de {user}',
+  ticket_open_purchase_message text not null default 'ID do pedido: **gerando**\nProduto: **{product}**\nPreco: **{price}**\n\nAguarde o suporte aprovar sua compra.',
   sales_channel_id text,
   sales_mode text not null default 'embed',
   sales_color text not null default '#5865f2',
@@ -106,6 +111,8 @@ create table if not exists payment_settings (
   receiver_name text,
   public_instructions text,
   private_details_encrypted text,
+  terms_text text not null default 'Ao confirmar, voce declara que revisou os produtos, valores e entende que a entrega ocorre apos aprovacao do pagamento.',
+  pix_city text not null default 'SAO PAULO',
   updated_at timestamptz not null default now()
 );
 
@@ -133,6 +140,10 @@ create table if not exists tickets (
   product_id bigint references products(id) on delete set null,
   product_variant jsonb,
   payment_order_id uuid references payment_orders(id) on delete set null,
+  cart_message_id text,
+  terms_message_id text,
+  payment_message_id text,
+  cart_total_text text,
   purchase_status text not null default 'pending',
   approved_at timestamptz,
   rating integer,
@@ -140,6 +151,18 @@ create table if not exists tickets (
   status text not null default 'open',
   created_at timestamptz not null default now(),
   closed_at timestamptz
+);
+
+create table if not exists cart_items (
+  id bigserial primary key,
+  thread_id text not null references tickets(thread_id) on delete cascade,
+  product_id bigint references products(id) on delete set null,
+  product_name text not null,
+  variant jsonb,
+  unit_price_text text not null default '',
+  quantity integer not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists bot_logs (
@@ -163,4 +186,5 @@ alter table products enable row level security;
 alter table payment_settings enable row level security;
 alter table payment_orders enable row level security;
 alter table tickets enable row level security;
+alter table cart_items enable row level security;
 alter table bot_logs enable row level security;
