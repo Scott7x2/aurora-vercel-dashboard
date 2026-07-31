@@ -22,6 +22,7 @@ create table if not exists bot_instances (
   enabled boolean not null default false,
   last_seen_at timestamptz,
   last_error text,
+  runtime_warning text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique(owner_discord_id, guild_id)

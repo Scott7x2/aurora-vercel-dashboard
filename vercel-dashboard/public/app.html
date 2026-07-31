@@ -49,6 +49,7 @@
             <strong>Inicializacao pelo site</strong>
             <p>O usuario nao precisa baixar nada. Ele salva o token aqui, clica para ativar e a central 24h liga o bot automaticamente. O Vercel cuida do painel; o runner hospedado separadamente mantem os bots conectados ao Discord.</p>
           </div>
+          <div id="runtimeWarning" class="runtime-warning"></div>
           <div class="grid">
             <label><span>Nome</span><input id="instanceName" placeholder="Aurora Sales"></label>
             <label><span>Token do bot</span><input id="botToken" type="password" placeholder="Cole somente ao criar/trocar"></label>
@@ -89,6 +90,10 @@
 
         <section id="tab-auth" class="tab">
           <div class="head"><div><h2>Acesso e entrada</h2><p>Autorole, verificacao e boas-vindas.</p></div></div>
+          <div class="saved-help">
+            <strong>Para o cargo automatico funcionar</strong>
+            <p>Ative <b>Server Members Intent</b> no Discord Developer Portal do bot e deixe o cargo do bot acima do cargo automatico. Sem isso, o Discord nao avisa quando alguem entra ou bloqueia a aplicacao do cargo.</p>
+          </div>
           <div class="grid">
             <label><span>Cargo automatico</span><select id="auto_role_id" data-kind="role"></select></label>
             <label><span>Cargo verificado</span><select id="verified_role_id" data-kind="role"></select></label>

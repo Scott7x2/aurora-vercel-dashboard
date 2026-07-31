@@ -23,6 +23,7 @@ const pool = new Pool({ connectionString: env('DATABASE_URL'), ssl: { rejectUnau
 const key = Buffer.from(env('BOT_ENCRYPTION_KEY'), 'base64');
 if (key.length !== 32) throw new Error('BOT_ENCRYPTION_KEY deve ser Base64 de 32 bytes.');
 const pollInterval = Math.max(Number(env('POLL_INTERVAL_MS')) || 8000, 3000);
+const fullIntentRetryInterval = Math.max(Number(env('FULL_INTENT_RETRY_MS')) || 60000, 15000);
 const runnerName = env('RUNNER_NAME') || 'aurora-zero-runner';
 
 const running = new Map();
@@ -143,6 +144,14 @@ async function setError(id, message) {
   await query('update bot_instances set last_error=$1, last_seen_at=null, updated_at=now() where id=$2', [String(message || '').slice(0, 500), id]);
 }
 
+async function setWarning(id, message) {
+  await query('update bot_instances set runtime_warning=$1, updated_at=now() where id=$2', [String(message || '').slice(0, 500), id]);
+}
+
+async function clearWarning(id) {
+  await query('update bot_instances set runtime_warning=null, updated_at=now() where id=$1', [id]);
+}
+
 async function getSettings(instanceId) {
   await query('insert into bot_settings (bot_instance_id) values ($1) on conflict (bot_instance_id) do nothing', [instanceId]);
   return one('select * from bot_settings where bot_instance_id=$1', [instanceId]);
@@ -156,7 +165,7 @@ async function product(instanceId, id) {
   return one('select * from products where bot_instance_id=$1 and id=$2', [instanceId, id]);
 }
 
-async function sync(instance, client) {
+async function sync(instance, client, withMembersIntent = true) {
   const guild = client.guilds.cache.get(instance.guild_id);
   if (!guild) {
     await setError(instance.id, 'Esse bot ainda nao esta no servidor selecionado.');
@@ -179,6 +188,7 @@ async function sync(instance, client) {
     on conflict (bot_instance_id) do update set channels=excluded.channels, roles=excluded.roles, updated_at=now()
   `, [instance.id, JSON.stringify(channels), JSON.stringify(roles)]);
   await query('update bot_instances set guild_name=$1,last_seen_at=now(),last_error=null,updated_at=now() where id=$2', [guild.name, instance.id]);
+  if (withMembersIntent) await clearWarning(instance.id);
   await guild.commands.set(commands);
 }
 
@@ -299,7 +309,7 @@ async function start(instance) {
     client.once(Events.ClientReady, async () => {
       const mode = withMembersIntent ? 'com members intent' : 'modo basico sem members intent';
       console.log(`[${runnerName}] Online: ${client.user.tag} / ${instance.guild_name} (${mode})`);
-      await sync(instance, client).catch((error) => setError(instance.id, error.message));
+      await sync(instance, client, withMembersIntent).catch((error) => setError(instance.id, error.message));
     });
 
     client.on(Events.Error, (error) => {
@@ -307,13 +317,19 @@ async function start(instance) {
       setError(instance.id, error.message).catch(console.error);
     });
     client.on(Events.Warn, (warning) => console.warn(`[${runnerName}] Discord warning (${instance.bot_name || instance.id}):`, warning));
-    client.on(Events.GuildCreate, () => sync(instance, client).catch((error) => setError(instance.id, error.message)));
+    client.on(Events.GuildCreate, () => sync(instance, client, withMembersIntent).catch((error) => setError(instance.id, error.message)));
 
     if (withMembersIntent) {
       client.on(Events.GuildMemberAdd, async (member) => {
         if (member.guild.id !== instance.guild_id) return;
         const settings = await getSettings(instance.id);
-        if (settings.auto_role_id) await member.roles.add(settings.auto_role_id).catch(() => null);
+        if (settings.auto_role_id) {
+          await member.roles.add(settings.auto_role_id).catch((error) => {
+            const message = `Falha ao aplicar cargo automatico: ${error.message}. Verifique se o bot tem Gerenciar Cargos e se o cargo do bot esta acima do cargo automatico.`;
+            console.error(`[${runnerName}] ${message}`);
+            setWarning(instance.id, message).catch(console.error);
+          });
+        }
         if (!settings.welcome_channel_id) return;
         const channel = await member.guild.channels.fetch(settings.welcome_channel_id).catch(() => null);
         if (!channel?.isTextBased?.()) return;
@@ -346,15 +362,17 @@ async function start(instance) {
   let client = buildClient(true);
   try {
     await client.login(decrypt(instance.token_encrypted));
-    running.set(instance.id, client);
+    running.set(instance.id, { client, withMembersIntent: true, nextFullRetryAt: null });
   } catch (error) {
     if (/disallowed intents/i.test(error.message || '')) {
       client.destroy();
+      const warning = 'Auto role e boas-vindas ao entrar precisam do Server Members Intent ativado no Discord Developer Portal. O bot esta online em modo basico.';
       console.warn(`[${runnerName}] ${instance.bot_name || instance.guild_name} sem Server Members Intent. Iniciando em modo basico.`);
+      await setWarning(instance.id, warning).catch(console.error);
       client = buildClient(false);
       try {
         await client.login(decrypt(instance.token_encrypted));
-        running.set(instance.id, client);
+        running.set(instance.id, { client, withMembersIntent: false, nextFullRetryAt: Date.now() + fullIntentRetryInterval });
         return;
       } catch (fallbackError) {
         await setError(instance.id, fallbackError.message);
@@ -365,16 +383,23 @@ async function start(instance) {
   }
 }
 async function stop(id) {
-  const client = running.get(id);
-  if (!client) return;
-  client.destroy();
+  const entry = running.get(id);
+  if (!entry) return;
+  entry.client.destroy();
   running.delete(id);
 }
 
 async function reconcile() {
   const data = await query('select * from bot_instances where enabled=true');
   const ids = new Set((data || []).map((item) => item.id));
-  for (const instance of data || []) await start(instance);
+  for (const instance of data || []) {
+    const entry = running.get(instance.id);
+    if (entry && !entry.withMembersIntent && entry.nextFullRetryAt && Date.now() >= entry.nextFullRetryAt) {
+      console.log(`[${runnerName}] Tentando religar ${instance.bot_name || instance.guild_name} em modo completo.`);
+      await stop(instance.id);
+    }
+    await start(instance);
+  }
   for (const id of running.keys()) if (!ids.has(id)) await stop(id);
 }
 

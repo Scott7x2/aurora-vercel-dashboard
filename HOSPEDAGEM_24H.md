@@ -47,6 +47,7 @@ DATABASE_URL=postgresql://...
 BOT_ENCRYPTION_KEY=mesma_chave_base64_do_vercel
 RUNNER_NAME=aurora-zero-runner
 POLL_INTERVAL_MS=8000
+FULL_INTENT_RETRY_MS=60000
 ```
 
 ## Variaveis obrigatorias
@@ -83,6 +84,14 @@ Recomendado:
 
 ```env
 POLL_INTERVAL_MS=8000
+```
+
+### FULL_INTENT_RETRY_MS
+
+Tempo para o runner tentar iniciar novamente em modo completo quando o bot esta sem `Server Members Intent`.
+
+```env
+FULL_INTENT_RETRY_MS=60000
 ```
 
 ## O que o usuario final faz

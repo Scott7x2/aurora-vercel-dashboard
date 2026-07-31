@@ -11,6 +11,7 @@ DATABASE_URL=postgresql://...
 BOT_ENCRYPTION_KEY=mesma_chave_base64_do_vercel
 RUNNER_NAME=aurora-zero-runner
 POLL_INTERVAL_MS=8000
+FULL_INTENT_RETRY_MS=60000
 ```
 
 Use exatamente a mesma `BOT_ENCRYPTION_KEY` configurada no Vercel, senao o runner nao conseguira descriptografar os tokens salvos pelo site.
@@ -24,7 +25,7 @@ Configuracao do servico:
 - Root Directory: `discord-runner`
 - Build Command: `npm ci --omit=dev`
 - Start Command: `npm start`
-- Variaveis: `DATABASE_URL`, `BOT_ENCRYPTION_KEY`, `RUNNER_NAME`, `POLL_INTERVAL_MS`
+- Variaveis: `DATABASE_URL`, `BOT_ENCRYPTION_KEY`, `RUNNER_NAME`, `POLL_INTERVAL_MS`, `FULL_INTENT_RETRY_MS`
 
 Se a plataforma aceitar Docker, use o `Dockerfile` desta pasta.
 
@@ -51,6 +52,8 @@ Logs:
 Ative no Discord Developer Portal:
 
 - Server Members Intent
+
+Sem `Server Members Intent`, o bot ainda inicia em modo basico para paineis, tickets e vendas. Porem autorole e mensagem automatica quando alguem entra nao funcionam, porque o Discord nao envia o evento de novo membro. Depois que ativar o intent, o runner tenta voltar ao modo completo automaticamente a cada `FULL_INTENT_RETRY_MS`.
 
 Convide o bot com permissoes de:
 

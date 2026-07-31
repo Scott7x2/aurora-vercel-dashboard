@@ -8,6 +8,7 @@ alter table bot_instances add column if not exists token_encrypted text;
 alter table bot_instances add column if not exists enabled boolean not null default false;
 alter table bot_instances add column if not exists last_seen_at timestamptz;
 alter table bot_instances add column if not exists last_error text;
+alter table bot_instances add column if not exists runtime_warning text;
 alter table bot_instances add column if not exists created_at timestamptz not null default now();
 alter table bot_instances add column if not exists updated_at timestamptz not null default now();
 

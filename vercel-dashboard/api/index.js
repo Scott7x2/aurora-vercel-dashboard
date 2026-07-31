@@ -169,6 +169,7 @@ function publicInstance(instance) {
     enabled: instance.enabled,
     last_seen_at: instance.last_seen_at,
     last_error: instance.last_error,
+    runtime_warning: instance.runtime_warning,
     invite_url: botInviteUrl(instance.bot_client_id, instance.guild_id)
   };
 }
@@ -331,7 +332,7 @@ app.get('/api/guilds', async (req, res, next) => {
     if (!user) return;
     const guilds = (await discord('/users/@me/guilds', user.access_token)).filter(hasManageGuild);
     const instances = await query(
-      'select id,guild_id,guild_name,bot_name,bot_client_id,enabled,last_seen_at,last_error from bot_instances where owner_discord_id = $1',
+      'select id,guild_id,guild_name,bot_name,bot_client_id,enabled,last_seen_at,last_error,runtime_warning from bot_instances where owner_discord_id = $1',
       [user.discord_id]
     );
     const byGuild = new Map(instances.map((item) => [item.guild_id, item]));
@@ -363,7 +364,7 @@ app.get('/api/instances', async (req, res, next) => {
     const user = await requireSession(req, res);
     if (!user) return;
     const instances = await query(
-      'select id,guild_id,guild_name,bot_name,bot_client_id,enabled,last_seen_at,last_error from bot_instances where owner_discord_id = $1 order by updated_at desc nulls last, created_at desc nulls last',
+      'select id,guild_id,guild_name,bot_name,bot_client_id,enabled,last_seen_at,last_error,runtime_warning from bot_instances where owner_discord_id = $1 order by updated_at desc nulls last, created_at desc nulls last',
       [user.discord_id]
     );
     res.json(instances.map(publicInstance));
@@ -408,7 +409,7 @@ app.post('/api/instances', async (req, res, next) => {
       do update set guild_name = excluded.guild_name, bot_name = excluded.bot_name,
         bot_client_id = excluded.bot_client_id, token_encrypted = excluded.token_encrypted,
         enabled = excluded.enabled, last_error = excluded.last_error, updated_at = now()
-      returning id,guild_id,guild_name,bot_name,bot_client_id,enabled,last_seen_at,last_error
+      returning id,guild_id,guild_name,bot_name,bot_client_id,enabled,last_seen_at,last_error,runtime_warning
     `, [user.discord_id, guildId, guildName, botName, botClientId, tokenEncrypted, enabled, lastError]);
     await ensureSettings(saved.id);
     res.json(publicInstance(saved));
@@ -426,7 +427,7 @@ app.post('/api/instances/:id/enabled', async (req, res, next) => {
     const saved = await one(`
       update bot_instances set enabled = $1, last_error = null, updated_at = now()
       where id = $2
-      returning id,guild_id,guild_name,bot_name,bot_client_id,enabled,last_seen_at,last_error
+      returning id,guild_id,guild_name,bot_name,bot_client_id,enabled,last_seen_at,last_error,runtime_warning
     `, [Boolean(req.body.enabled), instance.id]);
     res.json(publicInstance(saved));
   } catch (error) {

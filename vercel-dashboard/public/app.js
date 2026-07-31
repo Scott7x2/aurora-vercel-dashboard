@@ -65,6 +65,11 @@ function header() {
     invite.classList.toggle('disabled', !state.instance?.invite_url);
     invite.textContent = state.instance?.invite_url ? 'Adicionar bot ao servidor' : 'Salve um token valido para gerar o convite';
   }
+  const warning = $('runtimeWarning');
+  if (warning) {
+    warning.textContent = state.instance?.runtime_warning || '';
+    warning.classList.toggle('show', Boolean(state.instance?.runtime_warning));
+  }
   $('enabled').checked = Boolean(state.instance?.enabled);
   const online = Boolean(state.instance?.enabled && state.instance?.last_seen_at && !state.instance?.last_error);
   $('botDot').className = online ? 'online' : '';
