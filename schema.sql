@@ -77,10 +77,22 @@ create table if not exists products (
   bot_instance_id uuid not null references bot_instances(id) on delete cascade,
   name text not null,
   price text not null,
+  product_type text not null default 'single',
+  variations jsonb not null default '[]'::jsonb,
   description text,
   image_url text,
   active boolean not null default true,
   created_at timestamptz not null default now()
+);
+
+create table if not exists payment_settings (
+  bot_instance_id uuid primary key references bot_instances(id) on delete cascade,
+  provider text not null default 'manual',
+  checkout_mode text not null default 'ticket',
+  receiver_name text,
+  public_instructions text,
+  private_details_encrypted text,
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists tickets (
@@ -89,6 +101,7 @@ create table if not exists tickets (
   guild_id text not null,
   owner_id text not null,
   product_id bigint references products(id) on delete set null,
+  product_variant jsonb,
   status text not null default 'open',
   created_at timestamptz not null default now(),
   closed_at timestamptz
@@ -99,4 +112,5 @@ alter table bot_instances enable row level security;
 alter table guild_resources enable row level security;
 alter table bot_settings enable row level security;
 alter table products enable row level security;
+alter table payment_settings enable row level security;
 alter table tickets enable row level security;

@@ -1,4 +1,4 @@
-const state = { me: null, guilds: [], instances: [], guild: null, instance: null, resources: { channels: [], roles: [] }, settings: null, products: [] };
+const state = { me: null, guilds: [], instances: [], guild: null, instance: null, resources: { channels: [], roles: [] }, settings: null, payment: null, products: [] };
 const ids = [
   'brand_name', 'brand_color', 'auto_role_id', 'verified_role_id', 'remove_auto_role_after_verify',
   'welcome_channel_id', 'welcome_mode', 'welcome_color', 'welcome_title', 'welcome_message',
@@ -269,11 +269,42 @@ function renderProducts() {
     node.className = 'product';
     node.innerHTML = '<div><strong></strong><small></small><p></p></div><button>Excluir</button>';
     node.querySelector('strong').textContent = product.name;
-    node.querySelector('small').textContent = product.price;
-    node.querySelector('p').textContent = product.description || '';
+    const variations = Array.isArray(product.variations) ? product.variations : [];
+    node.querySelector('small').textContent = product.product_type === 'variation'
+      ? `${variations.length} variacao(oes) - a partir de ${product.price}`
+      : product.price;
+    node.querySelector('p').textContent = product.product_type === 'variation'
+      ? variations.map((item) => `${item.name} | ${item.price}${item.description ? ` | ${item.description}` : ''}`).join('\n')
+      : product.description || '';
     node.querySelector('button').onclick = () => deleteProduct(product.id);
     $('products').appendChild(node);
   });
+}
+
+function parseProductVariations() {
+  return String($('productVariations')?.value || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [name, price, ...description] = line.split('|').map((part) => part.trim());
+      return { name, price, description: description.join(' | ') };
+    })
+    .filter((item) => item.name && item.price);
+}
+
+function renderPayment() {
+  const payment = state.payment || {};
+  if ($('paymentProvider')) $('paymentProvider').value = payment.provider || 'manual';
+  if ($('checkoutMode')) $('checkoutMode').value = payment.checkout_mode || 'ticket';
+  if ($('receiverName')) $('receiverName').value = payment.receiver_name || '';
+  if ($('publicPaymentInstructions')) $('publicPaymentInstructions').value = payment.public_instructions || '';
+  if ($('privatePaymentDetails')) $('privatePaymentDetails').value = '';
+  if ($('paymentStatus')) {
+    $('paymentStatus').textContent = payment.has_private_details
+      ? `Dado privado salvo: ${payment.private_details_preview || 'criptografado'}`
+      : 'Nenhum dado privado salvo. Use gateway intermediario para maior seguranca.';
+  }
 }
 
 async function selectGuild(id) {
@@ -357,13 +388,16 @@ async function refreshResources() {
 async function loadSettings() {
   if (!state.instance) {
     state.settings = null;
+    state.payment = null;
     state.products = [];
   } else {
     const data = await api(`/api/instances/${state.instance.id}/settings`);
     state.settings = data.settings;
+    state.payment = data.payment;
     state.products = data.products;
   }
   renderSettings();
+  renderPayment();
   renderProducts();
 }
 
@@ -409,14 +443,40 @@ async function saveSettings() {
 
 async function addProduct() {
   if (!state.instance) return msg('Salve o bot antes de cadastrar produtos.', true);
+  const productType = $('productType').value;
+  const variations = parseProductVariations();
   const product = await api(`/api/instances/${state.instance.id}/products`, {
     method: 'POST',
-    body: JSON.stringify({ name: $('productName').value, price: $('productPrice').value, image_url: $('productImage').value, description: $('productDescription').value })
+    body: JSON.stringify({
+      name: $('productName').value,
+      price: $('productPrice').value,
+      product_type: productType,
+      variations,
+      image_url: $('productImage').value,
+      description: $('productDescription').value
+    })
   });
   state.products.unshift(product);
-  ['productName', 'productPrice', 'productImage', 'productDescription'].forEach((id) => { $(id).value = ''; });
+  ['productName', 'productPrice', 'productImage', 'productDescription', 'productVariations'].forEach((id) => { $(id).value = ''; });
+  $('productType').value = 'single';
   renderProducts();
   msg('Produto cadastrado.');
+}
+
+async function savePayment() {
+  if (!state.instance) return msg('Salve o bot antes de configurar recebimento.', true);
+  state.payment = await api(`/api/instances/${state.instance.id}/payment`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      provider: $('paymentProvider').value,
+      checkout_mode: $('checkoutMode').value,
+      receiver_name: $('receiverName').value,
+      public_instructions: $('publicPaymentInstructions').value,
+      private_details: $('privatePaymentDetails').value
+    })
+  });
+  renderPayment();
+  msg('Recebimento salvo com seguranca.');
 }
 
 async function deleteProduct(id) {
@@ -465,6 +525,7 @@ function bind() {
   $('reloadResources').onclick = () => refreshResources().catch((error) => msg(error.message, true));
   $('saveSettings').onclick = () => saveSettings().catch((error) => msg(error.message, true));
   $('addProduct').onclick = () => addProduct().catch((error) => msg(error.message, true));
+  $('savePayment').onclick = () => savePayment().catch((error) => msg(error.message, true));
   $('uploadEmoji').onclick = () => uploadEmoji().catch((error) => msg(error.message, true));
   ids.forEach((id) => {
     const node = $(id);

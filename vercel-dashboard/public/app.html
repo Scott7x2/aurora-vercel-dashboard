@@ -140,11 +140,30 @@
           </div>
           <label><span>Mensagem vendas</span><textarea id="sales_message" rows="4"></textarea></label>
           <div id="sales_preview" class="message-preview"></div>
+          <div class="payment-card">
+            <div>
+              <h3>Recebimento seguro</h3>
+              <p>Use um gateway intermediario sempre que possivel. Assim seus dados bancarios reais ficam no provedor, nao no Discord nem no frontend.</p>
+            </div>
+            <div class="grid">
+              <label><span>Gateway / banco virtual</span><select id="paymentProvider"><option value="manual">Manual / combinar no ticket</option><option value="mercadopago">Mercado Pago</option><option value="stripe">Stripe</option><option value="pagseguro">PagSeguro</option><option value="asaas">Asaas</option><option value="other">Outro gateway</option></select></label>
+              <label><span>Modo do pagamento</span><select id="checkoutMode"><option value="ticket">Mostrar instrucao no ticket</option><option value="external">Gateway externo/intermediario</option></select></label>
+              <label><span>Nome do recebedor</span><input id="receiverName" placeholder="Nome da loja ou recebedor"></label>
+              <label><span>Dado privado opcional</span><input id="privatePaymentDetails" type="password" placeholder="Pix/chave/token interno - fica criptografado"></label>
+            </div>
+            <label><span>Instrucoes publicas de pagamento</span><textarea id="publicPaymentInstructions" rows="3" placeholder="Ex: Apos abrir o ticket, envie o comprovante. Link do checkout: https://..."></textarea></label>
+            <div class="actions">
+              <button id="savePayment" class="primary">Salvar recebimento</button>
+              <small id="paymentStatus">Nenhum recebimento configurado.</small>
+            </div>
+          </div>
           <div class="product-form">
+            <label><span>Tipo do produto</span><select id="productType"><option value="single">Produto unico</option><option value="variation">Produto com variacoes</option></select></label>
             <input id="productName" placeholder="Produto">
             <input id="productPrice" placeholder="Preco">
             <input id="productImage" placeholder="Imagem opcional">
             <textarea id="productDescription" rows="3" placeholder="Descricao"></textarea>
+            <textarea id="productVariations" rows="4" placeholder="Variacoes, uma por linha. Ex:&#10;1 dia | R$ 5,00 | Acesso por 24h&#10;7 dias | R$ 20,00 | Acesso semanal"></textarea>
             <button id="addProduct" class="primary">Adicionar produto</button>
           </div>
           <div id="products"></div>

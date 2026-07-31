@@ -143,6 +143,67 @@ function hexColor(value, fallback = '#5865f2') {
   return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value) : fallback;
 }
 
+function productType(value) {
+  return value === 'variation' ? 'variation' : 'single';
+}
+
+function productVariations(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => ({
+      name: text(item?.name, 80),
+      price: text(item?.price, 40),
+      description: text(item?.description, 500)
+    }))
+    .filter((item) => item.name && item.price)
+    .slice(0, 25);
+}
+
+function paymentProvider(value) {
+  const allowed = new Set(['manual', 'mercadopago', 'stripe', 'pagseguro', 'asaas', 'other']);
+  return allowed.has(value) ? value : 'manual';
+}
+
+function checkoutMode(value) {
+  return value === 'external' ? 'external' : 'ticket';
+}
+
+function maskPrivateDetails(value) {
+  const raw = text(value, 300);
+  if (!raw) return '';
+  if (raw.length <= 6) return '••••••';
+  return `${raw.slice(0, 3)}••••••${raw.slice(-3)}`;
+}
+
+function publicPayment(row) {
+  if (!row) {
+    return {
+      provider: 'manual',
+      checkout_mode: 'ticket',
+      receiver_name: '',
+      public_instructions: '',
+      has_private_details: false,
+      private_details_preview: ''
+    };
+  }
+  let preview = '';
+  if (row.private_details_encrypted) {
+    try {
+      preview = maskPrivateDetails(decrypt(row.private_details_encrypted));
+    } catch {
+      preview = '••••••';
+    }
+  }
+  return {
+    provider: row.provider || 'manual',
+    checkout_mode: row.checkout_mode || 'ticket',
+    receiver_name: row.receiver_name || '',
+    public_instructions: row.public_instructions || '',
+    has_private_details: Boolean(row.private_details_encrypted),
+    private_details_preview: preview
+  };
+}
+
 function hasManageGuild(guild) {
   if (guild.owner) return true;
   try {
@@ -275,6 +336,11 @@ async function getInstance(id, ownerDiscordId) {
 async function ensureSettings(instanceId) {
   await query('insert into bot_settings (bot_instance_id) values ($1) on conflict (bot_instance_id) do nothing', [instanceId]);
   return one('select * from bot_settings where bot_instance_id = $1', [instanceId]);
+}
+
+async function ensurePayment(instanceId) {
+  await query('insert into payment_settings (bot_instance_id) values ($1) on conflict (bot_instance_id) do nothing', [instanceId]);
+  return one('select * from payment_settings where bot_instance_id = $1', [instanceId]);
 }
 
 app.get('/app.css', (_, res) => res.sendFile(path.join(publicDir, 'app.css')));
@@ -496,7 +562,8 @@ app.get('/api/instances/:id/settings', async (req, res, next) => {
     if (!instance) return res.status(404).json({ error: 'not_found' });
     const settings = await ensureSettings(instance.id);
     const products = await query('select * from products where bot_instance_id = $1 order by created_at desc', [instance.id]);
-    res.json({ settings, products });
+    const payment = publicPayment(await ensurePayment(instance.id));
+    res.json({ settings, products, payment });
   } catch (error) {
     next(error);
   }
@@ -600,13 +667,52 @@ app.post('/api/instances/:id/products', async (req, res, next) => {
     const instance = await getInstance(req.params.id, user.discord_id);
     if (!instance) return res.status(404).json({ error: 'not_found' });
     const name = text(req.body.name, 80);
-    const price = text(req.body.price, 50);
+    const type = productType(req.body.product_type);
+    const variations = productVariations(req.body.variations);
+    const price = type === 'variation' ? (variations[0]?.price || '') : text(req.body.price, 50);
     if (!name || !price) return res.status(400).json({ error: 'name_and_price_required' });
+    if (type === 'variation' && !variations.length) return res.status(400).json({ error: 'variations_required', message: 'Cadastre pelo menos uma variacao com nome e preco.' });
     const saved = await one(`
-      insert into products (bot_instance_id,name,price,description,image_url,active)
-      values ($1,$2,$3,$4,$5,$6) returning *
-    `, [instance.id, name, price, text(req.body.description, 1000), text(req.body.image_url, 300), req.body.active !== false]);
+      insert into products (bot_instance_id,name,price,product_type,variations,description,image_url,active)
+      values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8) returning *
+    `, [instance.id, name, price, type, json(variations), text(req.body.description, 1000), text(req.body.image_url, 300), req.body.active !== false]);
     res.json(saved);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/instances/:id/payment', async (req, res, next) => {
+  try {
+    const user = await requireSession(req, res);
+    if (!user) return;
+    const instance = await getInstance(req.params.id, user.discord_id);
+    if (!instance) return res.status(404).json({ error: 'not_found' });
+    const body = req.body || {};
+    const existing = await ensurePayment(instance.id);
+    const rawPrivate = text(body.private_details, 300);
+    const encryptedPrivate = rawPrivate ? encrypt(rawPrivate) : existing.private_details_encrypted;
+    const saved = await one(`
+      insert into payment_settings (
+        bot_instance_id,provider,checkout_mode,receiver_name,public_instructions,private_details_encrypted,updated_at
+      ) values ($1,$2,$3,$4,$5,$6,now())
+      on conflict (bot_instance_id) do update set
+        provider=excluded.provider,
+        checkout_mode=excluded.checkout_mode,
+        receiver_name=excluded.receiver_name,
+        public_instructions=excluded.public_instructions,
+        private_details_encrypted=excluded.private_details_encrypted,
+        updated_at=now()
+      returning *
+    `, [
+      instance.id,
+      paymentProvider(body.provider),
+      checkoutMode(body.checkout_mode),
+      text(body.receiver_name, 120),
+      text(body.public_instructions, 1500),
+      encryptedPrivate
+    ]);
+    res.json(publicPayment(saved));
   } catch (error) {
     next(error);
   }

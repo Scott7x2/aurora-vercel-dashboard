@@ -139,6 +139,9 @@ function renderTemplate(template, context = {}) {
     product: context.product?.name || '',
     price: context.product?.price || '',
     productDescription: context.product?.description || '',
+    variation: context.variant?.name || '',
+    variationPrice: context.variant?.price || '',
+    variationDescription: context.variant?.description || '',
     ticket: context.thread ? `<#${context.thread.id}>` : '',
     ticketId: context.thread?.id || '',
     emoji: settings.button_emoji || '',
@@ -186,6 +189,43 @@ async function products(instanceId) {
 
 async function product(instanceId, id) {
   return one('select * from products where bot_instance_id=$1 and id=$2', [instanceId, id]);
+}
+
+async function paymentSettings(instanceId) {
+  return one('select * from payment_settings where bot_instance_id=$1', [instanceId]);
+}
+
+function variationsOf(item) {
+  return Array.isArray(item?.variations) ? item.variations : [];
+}
+
+function chosenPrice(item, variant = null) {
+  return variant?.price || item?.price || '';
+}
+
+function paymentText(payment) {
+  if (!payment) return 'Pagamento: combine os detalhes com o suporte neste ticket.';
+  const lines = [];
+  const providerNames = {
+    manual: 'Manual / combinado no ticket',
+    mercadopago: 'Mercado Pago',
+    stripe: 'Stripe',
+    pagseguro: 'PagSeguro',
+    asaas: 'Asaas',
+    other: 'Gateway externo'
+  };
+  lines.push(`Pagamento: **${providerNames[payment.provider] || payment.provider || 'Manual'}**`);
+  if (payment.receiver_name) lines.push(`Recebedor: **${payment.receiver_name}**`);
+  if (payment.checkout_mode === 'external') lines.push('Modo: gateway intermediario/checkout externo.');
+  if (payment.public_instructions) lines.push(payment.public_instructions);
+  if (payment.provider === 'manual' && payment.private_details_encrypted) {
+    try {
+      lines.push(`Dados privados configurados: **${decrypt(payment.private_details_encrypted)}**`);
+    } catch {
+      lines.push('Dados privados configurados, mas nao foi possivel descriptografar.');
+    }
+  }
+  return lines.join('\n');
 }
 
 async function sync(instance, client, withMembersIntent = true) {
@@ -243,7 +283,10 @@ async function panel(instanceId, type, context = {}) {
   items.slice(0, 25).forEach((item, index) => {
     const n = Math.floor(index / 5);
     rows[n] ||= new ActionRowBuilder();
-    rows[n].addComponents(btn(`az:buy:${item.id}`, renderTemplate(item.name, { ...context, product: item }), ButtonStyle.Success, settings.button_emoji));
+    const label = item.product_type === 'variation'
+      ? `${renderTemplate(item.name, { ...context, product: item })} - opcoes`
+      : renderTemplate(item.name, { ...context, product: item });
+    rows[n].addComponents(btn(`az:buy:${item.id}`, label, ButtonStyle.Success, settings.button_emoji));
   });
   return messagePayload(settings, {
     mode: settings.sales_mode,
@@ -267,11 +310,33 @@ async function addTicketMembers(thread, interaction, settings) {
     .map((member) => thread.members.add(member.id).catch(() => null)));
 }
 
-async function openTicket(interaction, instance, productId = null) {
+async function chooseVariation(interaction, instance, productId) {
+  const settings = await getSettings(instance.id);
+  const item = await product(instance.id, productId);
+  if (!item) return interaction.reply({ content: 'Produto nao encontrado.', ephemeral: true });
+  const variations = variationsOf(item);
+  if (!variations.length) return openTicket(interaction, instance, productId);
+  const rows = [];
+  variations.slice(0, 25).forEach((variant, index) => {
+    const n = Math.floor(index / 5);
+    rows[n] ||= new ActionRowBuilder();
+    rows[n].addComponents(btn(`az:variant:${item.id}:${index}`, `${variant.name} - ${variant.price}`, ButtonStyle.Primary, settings.button_emoji));
+  });
+  return interaction.reply({
+    content: `Escolha uma variacao de **${item.name}** para continuar a compra:`,
+    components: rows,
+    ephemeral: true
+  });
+}
+
+async function openTicket(interaction, instance, productId = null, variantIndex = null) {
   const settings = await getSettings(instance.id);
   const parent = await interaction.guild.channels.fetch(settings.ticket_channel_id || interaction.channelId).catch(() => null);
   if (!parent?.isTextBased?.()) return interaction.reply({ content: 'Canal base de tickets nao configurado.', ephemeral: true });
   const item = productId ? await product(instance.id, productId) : null;
+  const variant = item && variantIndex !== null ? variationsOf(item)[Number(variantIndex)] || null : null;
+  if (item?.product_type === 'variation' && !variant) return chooseVariation(interaction, instance, productId);
+  const payment = item ? await paymentSettings(instance.id) : null;
   const thread = await parent.threads.create({
     name: `${item ? 'compra' : 'ticket'}-${interaction.user.username}`.slice(0, 95),
     type: ChannelType.PrivateThread,
@@ -279,19 +344,20 @@ async function openTicket(interaction, instance, productId = null) {
   });
   await addTicketMembers(thread, interaction, settings);
   await query(`
-    insert into tickets (thread_id,bot_instance_id,guild_id,owner_id,product_id,status,closed_at)
-    values ($1,$2,$3,$4,$5,'open',null)
+    insert into tickets (thread_id,bot_instance_id,guild_id,owner_id,product_id,product_variant,status,closed_at)
+    values ($1,$2,$3,$4,$5,$6::jsonb,'open',null)
     on conflict (thread_id) do update set status='open', closed_at=null
-  `, [thread.id, instance.id, interaction.guildId, interaction.user.id, item?.id || null]);
+  `, [thread.id, instance.id, interaction.guildId, interaction.user.id, item?.id || null, JSON.stringify(variant || null)]);
   const mentions = (settings.support_role_ids || []).map((id) => `<@&${id}>`).join(' ');
+  const ticketContext = { interaction, settings, product: item, variant, thread };
   await thread.send({
     content: `${interaction.user} ${mentions}`.trim(),
     embeds: [embed(
       settings,
-      renderTemplate(item ? 'Novo pedido de {user}' : 'Novo ticket de {user}', { interaction, settings, product: item, thread }),
+      renderTemplate(item ? 'Novo pedido de {user}' : 'Novo ticket de {user}', ticketContext),
       item
-        ? renderTemplate(`Produto: **{product}**\nPreco: **{price}**\n{productDescription}`, { interaction, settings, product: item, thread })
-        : renderTemplate('Ola {user}, descreva o atendimento. {supportRoleMentions}', { interaction, settings, thread }),
+        ? renderTemplate(`Produto: **{product}**\n${variant ? 'Variacao: **{variation}**\n' : ''}Preco: **${chosenPrice(item, variant)}**\n{productDescription}${variant?.description ? '\n{variationDescription}' : ''}\n\n${paymentText(payment)}`, ticketContext)
+        : renderTemplate('Ola {user}, descreva o atendimento. {supportRoleMentions}', ticketContext),
       settings.ticket_color
     )],
     components: [row(btn('az:close', 'Fechar ticket', ButtonStyle.Danger, settings.button_emoji))]
@@ -323,7 +389,7 @@ async function handle(interaction, instance) {
     return interaction.reply({ content: `Painel publicado em ${channel}.`, ephemeral: true });
   }
   if (!interaction.isButton() || !interaction.customId.startsWith('az:')) return;
-  const [, action, value] = interaction.customId.split(':');
+  const [, action, value, extra] = interaction.customId.split(':');
   if (action === 'auth') {
     const settings = await getSettings(instance.id);
     if (!settings.verified_role_id) return interaction.reply({ content: 'Cargo verificado nao configurado.', ephemeral: true });
@@ -332,7 +398,8 @@ async function handle(interaction, instance) {
     return interaction.reply({ content: 'Acesso liberado.', ephemeral: true });
   }
   if (action === 'ticket') return openTicket(interaction, instance);
-  if (action === 'buy') return openTicket(interaction, instance, Number(value));
+  if (action === 'buy') return chooseVariation(interaction, instance, Number(value));
+  if (action === 'variant') return openTicket(interaction, instance, Number(value), Number(extra));
   if (action === 'close') return closeTicket(interaction, instance);
 }
 

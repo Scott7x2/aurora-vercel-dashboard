@@ -54,13 +54,16 @@ h2 { font-size: 18px; }
 .switch span { display: block; width: 56px; height: 30px; border-radius: 999px; border: 1px solid var(--line); background: #080d1b; position: relative; cursor: pointer; }
 .switch span:after { content: ""; position: absolute; width: 22px; height: 22px; left: 4px; top: 3px; border-radius: 50%; background: var(--muted); transition: .18s; }
 .switch input:checked + span:after { transform: translateX(25px); background: var(--green); }
-.product-form { display: grid; grid-template-columns: 1fr 150px; gap: 12px; }
+.payment-card { display: grid; gap: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); }
+.payment-card h3 { margin: 0 0 6px; font-size: 15px; }
+.payment-card p { color: var(--muted); font-size: 13px; line-height: 1.45; }
+.product-form { display: grid; grid-template-columns: 1fr 150px; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); }
 .product-form textarea, .product-form button { grid-column: 1 / -1; }
 #products { display: grid; gap: 10px; }
 .product { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); }
 .product strong { display: block; }
 .product small { display: block; margin-top: 4px; }
-.product p { margin-top: 8px; color: var(--muted); font-size: 13px; }
+.product p { margin-top: 8px; color: var(--muted); font-size: 13px; white-space: pre-wrap; }
 .saved-help, .saved-bot-card { padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); }
 .saved-help { display: grid; gap: 6px; }
 .saved-help p { color: var(--muted); font-size: 13px; line-height: 1.45; }
