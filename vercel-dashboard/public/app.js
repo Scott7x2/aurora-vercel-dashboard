@@ -243,9 +243,28 @@ async function refreshStatus() {
   }
 }
 
-async function loadResources() {
-  state.resources = state.instance ? await api(`/api/instances/${state.instance.id}/resources`) : { channels: [], roles: [] };
+async function loadResources(force = false) {
+  if (!state.instance) {
+    state.resources = { channels: [], roles: [] };
+  } else {
+    state.resources = await api(
+      force ? `/api/instances/${state.instance.id}/resources/sync` : `/api/instances/${state.instance.id}/resources`,
+      force ? { method: 'POST', body: JSON.stringify({}) } : {}
+    );
+  }
   renderResources();
+}
+
+async function refreshResources() {
+  if (!state.instance) return msg('Salve o bot antes de buscar cargos e canais.', true);
+  $('reloadResources').textContent = 'Buscando...';
+  try {
+    await loadResources(true);
+    const count = `${state.resources.roles?.length || 0} cargos e ${state.resources.channels?.length || 0} canais`;
+    msg(`Cargos e canais atualizados: ${count}.`);
+  } finally {
+    $('reloadResources').textContent = 'Atualizar cargos e canais';
+  }
 }
 
 async function loadSettings() {
@@ -355,7 +374,7 @@ function bind() {
   $('guildSelect').onchange = (event) => selectGuild(event.target.value).catch((error) => msg(error.message, true));
   $('saveInstance').onclick = () => saveInstance().catch((error) => msg(error.message, true));
   $('enabled').onchange = () => toggle().catch((error) => msg(error.message, true));
-  $('reloadResources').onclick = () => loadResources().then(() => msg('Cargos e canais atualizados.')).catch((error) => msg(error.message, true));
+  $('reloadResources').onclick = () => refreshResources().catch((error) => msg(error.message, true));
   $('saveSettings').onclick = () => saveSettings().catch((error) => msg(error.message, true));
   $('addProduct').onclick = () => addProduct().catch((error) => msg(error.message, true));
   $('uploadEmoji').onclick = () => uploadEmoji().catch((error) => msg(error.message, true));

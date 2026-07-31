@@ -195,6 +195,48 @@ async function discordJson(pathname, token, body) {
   return data;
 }
 
+async function syncGuildResources(instance) {
+  const token = decrypt(instance.token_encrypted);
+  const [guild, channelsRaw, rolesRaw] = await Promise.all([
+    discord(`/guilds/${instance.guild_id}`, token, true),
+    discord(`/guilds/${instance.guild_id}/channels`, token, true),
+    discord(`/guilds/${instance.guild_id}/roles`, token, true)
+  ]);
+  const textChannelTypes = new Set([0, 5, 10, 11, 12, 15]);
+  const channels = (Array.isArray(channelsRaw) ? channelsRaw : [])
+    .filter((channel) => textChannelTypes.has(Number(channel.type)))
+    .map((channel) => ({
+      id: channel.id,
+      name: channel.name,
+      type: channel.type,
+      parent_id: channel.parent_id || null
+    }))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  const roles = (Array.isArray(rolesRaw) ? rolesRaw : [])
+    .filter((role) => !role.managed && role.name !== '@everyone')
+    .map((role) => ({
+      id: role.id,
+      name: role.name,
+      color: role.color
+    }))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+  const saved = await one(`
+    insert into guild_resources (bot_instance_id,channels,roles,updated_at)
+    values ($1,$2::jsonb,$3::jsonb,now())
+    on conflict (bot_instance_id) do update set
+      channels=excluded.channels,
+      roles=excluded.roles,
+      updated_at=now()
+    returning *
+  `, [instance.id, JSON.stringify(channels), JSON.stringify(roles)]);
+  await query(
+    'update bot_instances set guild_name=$1,last_error=null,updated_at=now() where id=$2',
+    [guild.name || instance.guild_name || 'Servidor', instance.id]
+  );
+  return saved || { channels, roles, updated_at: new Date().toISOString() };
+}
+
 async function session(req) {
   authReady();
   const payload = readCookie(req);
@@ -400,6 +442,28 @@ app.get('/api/instances/:id/resources', async (req, res, next) => {
     if (!instance) return res.status(404).json({ error: 'not_found' });
     const data = await one('select * from guild_resources where bot_instance_id = $1', [instance.id]);
     res.json(data || { channels: [], roles: [], updated_at: null });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/instances/:id/resources/sync', async (req, res, next) => {
+  try {
+    const user = await requireSession(req, res);
+    if (!user) return;
+    const instance = await getInstance(req.params.id, user.discord_id);
+    if (!instance) return res.status(404).json({ error: 'not_found' });
+    if (!instance.token_encrypted) return res.status(400).json({ error: 'token_required', message: 'Salve o token do bot antes de buscar cargos e canais.' });
+    try {
+      const data = await syncGuildResources(instance);
+      res.json(data);
+    } catch (error) {
+      const message = /403|404/.test(String(error.status || error.message))
+        ? 'Adicione o bot ao servidor selecionado e garanta permissao para Ver Canais/Gerenciar Cargos.'
+        : error.message;
+      await query('update bot_instances set last_error=$1,updated_at=now() where id=$2', [String(message).slice(0, 500), instance.id]);
+      res.status(error.status && Number(error.status) >= 400 ? Number(error.status) : 400).json({ error: 'resource_sync_failed', message });
+    }
   } catch (error) {
     next(error);
   }
