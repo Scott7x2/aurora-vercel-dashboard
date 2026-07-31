@@ -220,6 +220,62 @@ async function logEvent(instance, settings, type, message, metadata = {}) {
   }).catch(() => null);
 }
 
+async function applyAutoRole(member, instance, settings, reason = 'entrada') {
+  if (!settings?.auto_role_id) return false;
+  const guild = member.guild;
+  const role = await guild.roles.fetch(settings.auto_role_id).catch(() => null);
+  if (!role) {
+    const message = `Cargo automatico nao encontrado no Discord. Atualize cargos/canais no site e selecione novamente. ID: ${settings.auto_role_id}`;
+    await setWarning(instance.id, message).catch(console.error);
+    await logEvent(instance, settings, 'auto_role_failed', message, {
+      actorId: member.id,
+      targetId: settings.auto_role_id,
+      reason
+    });
+    return false;
+  }
+  const me = guild.members.me || await guild.members.fetchMe().catch(() => null);
+  if (!me) {
+    const message = 'Nao consegui identificar o membro do bot no servidor para aplicar o cargo automatico.';
+    await setWarning(instance.id, message).catch(console.error);
+    await logEvent(instance, settings, 'auto_role_failed', message, { actorId: member.id, targetId: role.id, reason });
+    return false;
+  }
+  if (!me.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    const message = 'Falha no cargo automatico: o bot nao tem permissao Gerenciar Cargos. Use o botao Adicionar bot ao servidor novamente ou ajuste as permissoes do cargo do bot.';
+    await setWarning(instance.id, message).catch(console.error);
+    await logEvent(instance, settings, 'auto_role_failed', message, { actorId: member.id, targetId: role.id, reason });
+    return false;
+  }
+  if (role.managed) {
+    const message = `Falha no cargo automatico: o cargo ${role.name} e gerenciado por integracao e nao pode ser aplicado manualmente.`;
+    await setWarning(instance.id, message).catch(console.error);
+    await logEvent(instance, settings, 'auto_role_failed', message, { actorId: member.id, targetId: role.id, reason });
+    return false;
+  }
+  if (me.roles.highest.comparePositionTo(role) <= 0) {
+    const message = `Falha no cargo automatico: mova o cargo do bot (${me.roles.highest.name}) para cima do cargo ${role.name} na hierarquia do Discord.`;
+    await setWarning(instance.id, message).catch(console.error);
+    await logEvent(instance, settings, 'auto_role_failed', message, { actorId: member.id, targetId: role.id, reason });
+    return false;
+  }
+  try {
+    await member.roles.add(role, `Aurora autorole: ${reason}`);
+    await logEvent(instance, settings, 'auto_role_applied', `Cargo automatico ${role.name} aplicado em ${member.user.tag}`, {
+      actorId: member.id,
+      targetId: role.id,
+      reason
+    });
+    return true;
+  } catch (error) {
+    const message = `Falha ao aplicar cargo automatico ${role.name}: ${error.message}`;
+    console.error(`[${runnerName}] ${message}`);
+    await setWarning(instance.id, `${message}. Verifique permissoes e hierarquia do cargo do bot.`).catch(console.error);
+    await logEvent(instance, settings, 'auto_role_failed', message, { actorId: member.id, targetId: role.id, reason });
+    return false;
+  }
+}
+
 function variationsOf(item) {
   return Array.isArray(item?.variations) ? item.variations : [];
 }
@@ -557,8 +613,16 @@ async function handle(interaction, instance) {
   if (action === 'auth') {
     const settings = await getSettings(instance.id);
     if (!settings.verified_role_id) return interaction.reply({ content: 'Cargo verificado nao configurado.', ephemeral: true });
-    await interaction.member.roles.add(settings.verified_role_id).catch(() => null);
-    if (settings.remove_auto_role_after_verify && settings.auto_role_id) await interaction.member.roles.remove(settings.auto_role_id).catch(() => null);
+    await interaction.member.roles.add(settings.verified_role_id).catch((error) => {
+      const message = `Falha ao aplicar cargo verificado: ${error.message}. Verifique permissao Gerenciar Cargos e hierarquia.`;
+      setWarning(instance.id, message).catch(console.error);
+    });
+    if (settings.remove_auto_role_after_verify && settings.auto_role_id) {
+      await interaction.member.roles.remove(settings.auto_role_id).catch((error) => {
+        const message = `Falha ao remover cargo automatico apos verificar: ${error.message}.`;
+        setWarning(instance.id, message).catch(console.error);
+      });
+    }
     await logEvent(instance, settings, 'auth_verified', `${interaction.user.tag} verificou acesso`, {
       actorId: interaction.user.id,
       channelId: interaction.channelId
@@ -601,13 +665,7 @@ async function start(instance) {
         await logEvent(instance, settings, 'member_join', `${member.user.tag} entrou no servidor`, {
           actorId: member.user.id
         });
-        if (settings.auto_role_id) {
-          await member.roles.add(settings.auto_role_id).catch((error) => {
-            const message = `Falha ao aplicar cargo automatico: ${error.message}. Verifique se o bot tem Gerenciar Cargos e se o cargo do bot esta acima do cargo automatico.`;
-            console.error(`[${runnerName}] ${message}`);
-            setWarning(instance.id, message).catch(console.error);
-          });
-        }
+        await applyAutoRole(member, instance, settings, 'entrada no servidor');
         if (!settings.welcome_channel_id) return;
         const channel = await member.guild.channels.fetch(settings.welcome_channel_id).catch(() => null);
         if (!channel?.isTextBased?.()) return;
@@ -666,7 +724,7 @@ async function start(instance) {
   } catch (error) {
     if (/disallowed intents/i.test(error.message || '')) {
       client.destroy();
-      const warning = 'Auto role e boas-vindas ao entrar precisam do Server Members Intent ativado no Discord Developer Portal. O bot esta online em modo basico.';
+      const warning = 'Auto role e boas-vindas nao podem funcionar neste bot enquanto o Server Members Intent estiver desativado no Discord Developer Portal. O Discord nao envia o evento de entrada neste modo. Ative o intent, salve, e aguarde o runner religar em modo completo.';
       console.warn(`[${runnerName}] ${instance.bot_name || instance.guild_name} sem Server Members Intent. Iniciando em modo basico.`);
       await setWarning(instance.id, warning).catch(console.error);
       client = buildClient(false);
