@@ -30,6 +30,9 @@ const autoRoleAuditInterval = Math.max(Number(env('AUTOROLE_AUDIT_INTERVAL_MS'))
 const runnerName = env('RUNNER_NAME') || 'aurora-zero-runner';
 
 const running = new Map();
+const raidJoins = new Map();
+const lastAutoMessageAt = new Map();
+const lastBackupAt = new Map();
 const commands = [
   new SlashCommandBuilder()
     .setName('painel')
@@ -233,6 +236,70 @@ async function ensureRuntimeSchema() {
       updated_at timestamptz not null default now()
     )
   `);
+  await query(`
+    create table if not exists feature_settings (
+      bot_instance_id uuid primary key references bot_instances(id) on delete cascade,
+      automations jsonb not null default '{}'::jsonb,
+      protect jsonb not null default '{}'::jsonb,
+      cloud jsonb not null default '{}'::jsonb,
+      updated_at timestamptz not null default now()
+    )
+  `);
+  await query(`
+    create table if not exists backup_snapshots (
+      id bigserial primary key,
+      bot_instance_id uuid not null references bot_instances(id) on delete cascade,
+      snapshot jsonb not null default '{}'::jsonb,
+      created_at timestamptz not null default now()
+    )
+  `);
+  await query('alter table feature_settings enable row level security');
+  await query('alter table backup_snapshots enable row level security');
+}
+
+function featureDefaults() {
+  return {
+    automations: {
+      auto_message_enabled: false,
+      auto_message_channel_id: '',
+      auto_message_text: 'Ola {server}! Confira as novidades da loja.',
+      auto_message_interval_minutes: 60,
+      cleanup_enabled: false,
+      cleanup_bad_words: '',
+      cleanup_delete_invites: false,
+      lock_enabled: false,
+      lock_channel_ids: [],
+      invite_tracker_enabled: false,
+      restock_alert_enabled: true
+    },
+    protect: {
+      moderation_enabled: true,
+      log_deleted_messages: true,
+      anti_raid_enabled: false,
+      anti_raid_join_limit: 5,
+      anti_raid_window_seconds: 20,
+      anti_raid_lockdown: false,
+      anti_fake_enabled: false,
+      anti_fake_min_account_days: 7,
+      anti_fake_action: 'log'
+    },
+    cloud: {
+      backup_enabled: true,
+      backup_interval_hours: 24
+    }
+  };
+}
+
+async function getFeatures(instanceId) {
+  await query('insert into feature_settings (bot_instance_id) values ($1) on conflict (bot_instance_id) do nothing', [instanceId]);
+  const row = await one('select * from feature_settings where bot_instance_id=$1', [instanceId]);
+  const defaults = featureDefaults();
+  return {
+    automations: { ...defaults.automations, ...(row?.automations || {}) },
+    protect: { ...defaults.protect, ...(row?.protect || {}) },
+    cloud: { ...defaults.cloud, ...(row?.cloud || {}) },
+    updated_at: row?.updated_at || null
+  };
 }
 
 function eventCategory(type) {
@@ -313,6 +380,130 @@ async function logEvent(instance, settings, type, message, metadata = {}) {
   await channel.send({
     embeds: [embed(settings, `Log ${category}: ${type}`, message || 'Evento registrado.', settings.brand_color)]
   }).catch(() => null);
+}
+
+async function createBackupSnapshot(instance) {
+  const [settings, features, productRows, payment, resources] = await Promise.all([
+    getSettings(instance.id),
+    getFeatures(instance.id),
+    query('select * from products where bot_instance_id=$1 order by created_at desc', [instance.id]),
+    one('select * from payment_settings where bot_instance_id=$1', [instance.id]),
+    one('select channels,roles,updated_at from guild_resources where bot_instance_id=$1', [instance.id])
+  ]);
+  const snapshot = {
+    instance: {
+      id: instance.id,
+      guild_id: instance.guild_id,
+      guild_name: instance.guild_name,
+      bot_name: instance.bot_name,
+      enabled: instance.enabled
+    },
+    settings,
+    features,
+    products: productRows,
+    payment: payment ? { ...payment, private_details_encrypted: Boolean(payment.private_details_encrypted) } : null,
+    resources
+  };
+  await query('insert into backup_snapshots (bot_instance_id,snapshot) values ($1,$2::jsonb)', [instance.id, JSON.stringify(snapshot)]);
+  return snapshot;
+}
+
+async function applyChannelLocks(instance, client, settings, features, reason = 'configuracao') {
+  const ids = Array.isArray(features.automations.lock_channel_ids) ? features.automations.lock_channel_ids : [];
+  if (!features.automations.lock_enabled || !ids.length) return;
+  const guild = client.guilds.cache.get(instance.guild_id);
+  if (!guild) return;
+  for (const channelId of ids) {
+    const channel = await guild.channels.fetch(channelId).catch(() => null);
+    if (!channel?.permissionOverwrites?.edit) continue;
+    await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: false }, { reason: `Aurora Lock: ${reason}` }).catch((error) => {
+      logEvent(instance, settings, 'lock_failed', `Falha ao travar <#${channelId}>: ${error.message}`, { channelId, category: 'sistema' }).catch(console.error);
+    });
+  }
+}
+
+async function runAutoMessage(instance, client) {
+  const settings = await getSettings(instance.id);
+  const features = await getFeatures(instance.id);
+  const auto = features.automations;
+  if (!auto.auto_message_enabled || !auto.auto_message_channel_id) return;
+  const intervalMs = Math.max(Number(auto.auto_message_interval_minutes || 60), 5) * 60 * 1000;
+  const key = `${instance.id}:${auto.auto_message_channel_id}`;
+  if (Date.now() - Number(lastAutoMessageAt.get(key) || 0) < intervalMs) return;
+  const channel = await client.channels.fetch(auto.auto_message_channel_id).catch(() => null);
+  if (!channel?.isTextBased?.()) return;
+  await channel.send(messagePayload(settings, {
+    mode: 'embed',
+    color: settings.brand_color,
+    title: settings.brand_name || 'Aurora',
+    description: auto.auto_message_text || 'Confira as novidades da loja.',
+    context: { settings, guild: channel.guild, channel }
+  })).catch((error) => logEvent(instance, settings, 'auto_message_failed', error.message, { channelId: channel.id }).catch(console.error));
+  lastAutoMessageAt.set(key, Date.now());
+  await logEvent(instance, settings, 'auto_message_sent', `Mensagem automatica enviada em <#${channel.id}>`, { channelId: channel.id, category: 'sistema' });
+}
+
+async function runCloudBackup(instance) {
+  const settings = await getSettings(instance.id);
+  const features = await getFeatures(instance.id);
+  if (!features.cloud.backup_enabled) return;
+  const intervalMs = Math.max(Number(features.cloud.backup_interval_hours || 24), 1) * 60 * 60 * 1000;
+  if (Date.now() - Number(lastBackupAt.get(instance.id) || 0) < intervalMs) return;
+  await createBackupSnapshot(instance);
+  lastBackupAt.set(instance.id, Date.now());
+  await logEvent(instance, settings, 'cloud_backup_created', 'Backup automatico criado no Supabase.', { category: 'sistema' });
+}
+
+function badWordsList(value) {
+  return String(value || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean).slice(0, 80);
+}
+
+async function handleCleanupMessage(message, instance, settings, features) {
+  const auto = features.automations;
+  if (!auto.cleanup_enabled || message.author?.bot) return;
+  const content = String(message.content || '').toLowerCase();
+  const hasInvite = auto.cleanup_delete_invites && /(discord\.gg\/|discord\.com\/invite\/)/i.test(content);
+  const matchedWord = badWordsList(auto.cleanup_bad_words).find((word) => content.includes(word));
+  if (!hasInvite && !matchedWord) return;
+  await message.delete().catch(() => null);
+  await logEvent(instance, settings, 'cleanup_deleted_message', `Mensagem removida automaticamente em <#${message.channelId}>. Motivo: ${hasInvite ? 'convite' : `palavra "${matchedWord}"`}`, {
+    actorId: message.author?.id,
+    channelId: message.channelId,
+    category: 'mensagens'
+  });
+}
+
+async function handleAntiFake(member, instance, settings, features) {
+  const protect = features.protect;
+  if (!protect.anti_fake_enabled || member.user?.bot) return;
+  const ageMs = Date.now() - member.user.createdTimestamp;
+  const minMs = Number(protect.anti_fake_min_account_days || 7) * 24 * 60 * 60 * 1000;
+  if (ageMs >= minMs) return;
+  const message = `Anti-Fake detectou conta nova: ${member.user.tag} (${Math.floor(ageMs / 86400000)} dia(s)).`;
+  await logEvent(instance, settings, 'anti_fake_detected', message, { actorId: member.id, category: 'entrada' });
+  if (protect.anti_fake_action === 'kick') {
+    await member.kick('Aurora Anti-Fake: conta muito nova').catch((error) => {
+      logEvent(instance, settings, 'anti_fake_kick_failed', `Falha ao expulsar ${member.user.tag}: ${error.message}`, { actorId: member.id, category: 'entrada' }).catch(console.error);
+    });
+  }
+}
+
+async function handleAntiRaid(member, instance, client, settings, features) {
+  const protect = features.protect;
+  if (!protect.anti_raid_enabled || member.user?.bot) return;
+  const keyName = instance.id;
+  const now = Date.now();
+  const windowMs = Number(protect.anti_raid_window_seconds || 20) * 1000;
+  const list = (raidJoins.get(keyName) || []).filter((time) => now - time <= windowMs);
+  list.push(now);
+  raidJoins.set(keyName, list);
+  if (list.length < Number(protect.anti_raid_join_limit || 5)) return;
+  await logEvent(instance, settings, 'anti_raid_triggered', `Anti-Raid ativado: ${list.length} entradas em ${protect.anti_raid_window_seconds}s.`, {
+    actorId: member.id,
+    count: list.length,
+    category: 'entrada'
+  });
+  if (protect.anti_raid_lockdown) await applyChannelLocks(instance, client, settings, features, 'anti-raid').catch(console.error);
 }
 
 async function applyAutoRole(member, instance, settings, reason = 'entrada') {
@@ -1174,9 +1365,13 @@ async function start(instance) {
       client.on(Events.GuildMemberAdd, async (member) => {
         if (member.guild.id !== instance.guild_id) return;
         const settings = await getSettings(instance.id);
+        const features = await getFeatures(instance.id);
         await logEvent(instance, settings, 'member_join', `${member.user.tag} entrou no servidor`, {
-          actorId: member.user.id
+          actorId: member.user.id,
+          category: features.automations.invite_tracker_enabled ? 'entrada' : undefined
         });
+        await handleAntiFake(member, instance, settings, features);
+        await handleAntiRaid(member, instance, client, settings, features);
         await applyAutoRole(member, instance, settings, 'entrada no servidor');
         await sendWelcome(member, instance, settings);
       });
@@ -1193,11 +1388,20 @@ async function start(instance) {
     client.on(Events.MessageDelete, async (message) => {
       if (message.guildId !== instance.guild_id) return;
       const settings = await getSettings(instance.id);
+      const features = await getFeatures(instance.id);
+      if (features.protect.moderation_enabled === false || features.protect.log_deleted_messages === false) return;
       await logEvent(instance, settings, 'message_deleted', `Mensagem apagada em <#${message.channelId}>${message.author ? ` por ${message.author.tag}` : ''}`, {
         actorId: message.author?.id,
         channelId: message.channelId,
         content: String(message.content || '').slice(0, 500)
       });
+    });
+
+    client.on(Events.MessageCreate, async (message) => {
+      if (message.guildId !== instance.guild_id) return;
+      const settings = await getSettings(instance.id);
+      const features = await getFeatures(instance.id);
+      await handleCleanupMessage(message, instance, settings, features);
     });
 
     client.on(Events.InteractionCreate, async (interaction) => {
@@ -1222,7 +1426,14 @@ async function start(instance) {
     const auditTimer = setInterval(() => {
       auditAutoRoles(instance, client, 'auditoria periodica').catch(console.error);
     }, autoRoleAuditInterval);
-    running.set(instance.id, { client, withMembersIntent: true, nextFullRetryAt: null, auditTimer });
+    const featureTimer = setInterval(async () => {
+      const features = await getFeatures(instance.id);
+      const settings = await getSettings(instance.id);
+      await applyChannelLocks(instance, client, settings, features, 'sincronizacao').catch(console.error);
+    }, 30000);
+    const autoMessageTimer = setInterval(() => runAutoMessage(instance, client).catch(console.error), 60000);
+    const backupTimer = setInterval(() => runCloudBackup(instance).catch(console.error), 60 * 60 * 1000);
+    running.set(instance.id, { client, withMembersIntent: true, nextFullRetryAt: null, auditTimer, featureTimer, autoMessageTimer, backupTimer });
   } catch (error) {
     if (/disallowed intents/i.test(error.message || '')) {
       client.destroy();
@@ -1232,7 +1443,14 @@ async function start(instance) {
       client = buildClient(false);
       try {
         await client.login(decrypt(instance.token_encrypted));
-        running.set(instance.id, { client, withMembersIntent: false, nextFullRetryAt: Date.now() + fullIntentRetryInterval });
+        const featureTimer = setInterval(async () => {
+          const features = await getFeatures(instance.id);
+          const settings = await getSettings(instance.id);
+          await applyChannelLocks(instance, client, settings, features, 'sincronizacao').catch(console.error);
+        }, 30000);
+        const autoMessageTimer = setInterval(() => runAutoMessage(instance, client).catch(console.error), 60000);
+        const backupTimer = setInterval(() => runCloudBackup(instance).catch(console.error), 60 * 60 * 1000);
+        running.set(instance.id, { client, withMembersIntent: false, nextFullRetryAt: Date.now() + fullIntentRetryInterval, featureTimer, autoMessageTimer, backupTimer });
         return;
       } catch (fallbackError) {
         await setError(instance.id, fallbackError.message);
@@ -1246,6 +1464,9 @@ async function stop(id) {
   const entry = running.get(id);
   if (!entry) return;
   if (entry.auditTimer) clearInterval(entry.auditTimer);
+  if (entry.featureTimer) clearInterval(entry.featureTimer);
+  if (entry.autoMessageTimer) clearInterval(entry.autoMessageTimer);
+  if (entry.backupTimer) clearInterval(entry.backupTimer);
   entry.client.destroy();
   running.delete(id);
 }

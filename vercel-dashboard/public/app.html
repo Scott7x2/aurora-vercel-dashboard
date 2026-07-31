@@ -344,27 +344,61 @@
 
         <section id="tab-automations" class="tab">
           <div class="head"><div><h2>Automacoes</h2><p>Acoes automaticas para manter seguranca, ordem e operacao da loja.</p></div></div>
-          <div class="module-grid">
-            <div class="module-card"><h3>⚡ Repostagem</h3><p>Republique painéis em intervalos definidos.</p><span>Em preparacao</span></div>
-            <div class="module-card"><h3>💬 Mensagens auto</h3><p>Mensagens automaticas com variaveis e horarios.</p><span>Em preparacao</span></div>
-            <div class="module-card"><h3>✨ Limpeza</h3><p>Limpeza automatica de mensagens e canais.</p><span>Em preparacao</span></div>
-            <div class="module-card"><h3>💚 Monitorar feedbacks</h3><p>Acompanhe avaliacoes e respostas dos compradores.</p><span>Integrado aos logs</span></div>
-            <div class="module-card"><h3># Lock-Unlock</h3><p>Trave e destrave canais rapidamente.</p><span>Em preparacao</span></div>
-            <div class="module-card"><h3>👥 Invite Tracker</h3><p>Rastreie convites e crescimento do servidor.</p><span>Em preparacao</span></div>
-            <div class="module-card"><h3>🔔 Alerta de Restock</h3><p>Avise quando produto voltar ao estoque.</p><span>Em preparacao</span></div>
+          <div class="feature-board">
+            <div class="feature-card">
+              <h3>⚡ Repostagem</h3>
+              <label class="check"><input id="feature_repost_enabled" type="checkbox"> Ativar repostagem de painéis</label>
+              <p>O runner deixa a função pronta para republicar painéis salvos sem usar o Discord como central de configuração.</p>
+            </div>
+            <div class="feature-card">
+              <h3>💬 Mensagens auto</h3>
+              <label class="check"><input id="feature_auto_message_enabled" type="checkbox"> Enviar mensagem automatica</label>
+              <div class="grid">
+                <label><span>Canal</span><select id="feature_auto_message_channel_id" data-feature-kind="channel" data-feature-value="auto_message_channel_id"></select></label>
+                <label><span>Intervalo em minutos</span><input id="feature_auto_message_interval_minutes" type="number" min="5" value="60"></label>
+              </div>
+              <label><span>Mensagem com variaveis</span><textarea id="feature_auto_message_text" rows="4" placeholder="Ola {server}! Confira a loja."></textarea></label>
+            </div>
+            <div class="feature-card">
+              <h3>✨ Limpeza</h3>
+              <label class="check"><input id="feature_cleanup_enabled" type="checkbox"> Ativar limpeza automatica</label>
+              <label class="check"><input id="feature_cleanup_delete_invites" type="checkbox"> Apagar convites de Discord</label>
+              <label><span>Palavras bloqueadas, separadas por virgula</span><textarea id="feature_cleanup_bad_words" rows="3" placeholder="spam, golpe, palavra"></textarea></label>
+            </div>
+            <div class="feature-card">
+              <h3># Lock-Unlock</h3>
+              <label class="check"><input id="feature_lock_enabled" type="checkbox"> Bloquear envio nos canais selecionados</label>
+              <label><span>Canais para travar</span><select id="feature_lock_channel_ids" data-feature-kind="channels" data-feature-value="lock_channel_ids" multiple size="5"></select></label>
+            </div>
+            <div class="feature-card">
+              <h3>👥 Invite Tracker</h3>
+              <label class="check"><input id="feature_invite_tracker_enabled" type="checkbox"> Registrar entradas e crescimento por logs</label>
+              <p>As entradas e saídas já aparecem nos logs; com essa opção o runner marca a categoria como crescimento.</p>
+            </div>
+            <div class="feature-card">
+              <h3>🔔 Alerta de Restock</h3>
+              <label class="check"><input id="feature_restock_alert_enabled" type="checkbox"> Avisar estoque baixo/acabando</label>
+              <p>Usa o limite da aba Pós-compra e envia log quando compra aprovada baixa o estoque.</p>
+            </div>
           </div>
+          <div class="actions"><button type="button" class="primary" data-save-features>Salvar automacoes</button><small id="featureUpdatedAt"></small></div>
         </section>
 
         <section id="tab-cloud" class="tab">
           <div class="head"><div><h2>AuroraCloud</h2><p>Infraestrutura em nuvem para sincronizacao e recuperacao.</p></div></div>
           <div class="setting-card">
             <h3>☁️ Status da nuvem</h3>
-            <p class="muted">O Supabase ja guarda bots, configuracoes, produtos, carrinhos, pedidos e logs. Backup automatico visual sera adicionado depois.</p>
+            <p class="muted">O Supabase guarda bots, configuracoes, produtos, carrinhos, pedidos, logs e agora snapshots de backup.</p>
             <div class="module-grid compact">
               <div class="module-card"><h3>Aplicacao OAuth2</h3><span>Conectada pelo Discord Login</span></div>
               <div class="module-card"><h3>Membros sincronizados</h3><span>Via runner 24h</span></div>
-              <div class="module-card"><h3>Backup automatico</h3><span>Em breve</span></div>
+              <div class="module-card"><h3>Backup automatico</h3><span>Ativo no Supabase</span></div>
             </div>
+            <div class="grid">
+              <label class="check"><input id="cloud_backup_enabled" type="checkbox"> Ativar backup automatico</label>
+              <label><span>Intervalo do backup em horas</span><input id="cloud_backup_interval_hours" type="number" min="1" value="24"></label>
+            </div>
+            <div class="actions"><button type="button" id="createBackup" class="primary">Criar backup agora</button><button type="button" data-save-features>Salvar Cloud</button></div>
           </div>
         </section>
 
@@ -396,11 +430,33 @@
 
         <section id="tab-protect" class="tab">
           <div class="head"><div><h2>AuroraProtect</h2><p>Protecoes de moderacao e anti-raid.</p></div></div>
-          <div class="module-grid">
-            <div class="module-card"><h3>🛡️ Moderacao</h3><p>Protecoes de moderacao do servidor.</p><span>Em preparacao</span></div>
-            <div class="module-card"><h3>🔨 Sistema Anti-Raid</h3><p>Detecte entrada suspeita e ações em massa.</p><span>Em preparacao</span></div>
-            <div class="module-card"><h3>🚫 Anti-Fake</h3><p>Bloqueio por idade de conta e comportamento.</p><span>Em preparacao</span></div>
+          <div class="feature-board">
+            <div class="feature-card">
+              <h3>🛡️ Moderacao</h3>
+              <label class="check"><input id="protect_moderation_enabled" type="checkbox"> Ativar logs de moderacao</label>
+              <label class="check"><input id="protect_log_deleted_messages" type="checkbox"> Registrar mensagens apagadas</label>
+              <p>Quando uma mensagem for apagada, o runner salva log no site e envia no canal de logs configurado.</p>
+            </div>
+            <div class="feature-card">
+              <h3>🔨 Sistema Anti-Raid</h3>
+              <label class="check"><input id="protect_anti_raid_enabled" type="checkbox"> Ativar anti-raid</label>
+              <div class="grid">
+                <label><span>Limite de entradas</span><input id="protect_anti_raid_join_limit" type="number" min="2" value="5"></label>
+                <label><span>Janela em segundos</span><input id="protect_anti_raid_window_seconds" type="number" min="5" value="20"></label>
+              </div>
+              <label class="check"><input id="protect_anti_raid_lockdown" type="checkbox"> Travar canais selecionados no Lock-Unlock ao detectar raid</label>
+            </div>
+            <div class="feature-card">
+              <h3>🚫 Anti-Fake</h3>
+              <label class="check"><input id="protect_anti_fake_enabled" type="checkbox"> Bloquear contas novas</label>
+              <div class="grid">
+                <label><span>Idade minima da conta em dias</span><input id="protect_anti_fake_min_account_days" type="number" min="1" value="7"></label>
+                <label><span>Acao</span><select id="protect_anti_fake_action"><option value="log">Apenas registrar log</option><option value="kick">Expulsar conta nova</option></select></label>
+              </div>
+              <p>Para expulsar, o bot precisa da permissao Expulsar Membros e estar acima do membro/cargo alvo.</p>
+            </div>
           </div>
+          <div class="actions"><button type="button" class="primary" data-save-features>Salvar AuroraProtect</button></div>
         </section>
 
         <section id="tab-identity" class="tab">

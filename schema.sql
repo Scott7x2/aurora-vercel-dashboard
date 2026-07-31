@@ -178,6 +178,21 @@ create table if not exists bot_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists feature_settings (
+  bot_instance_id uuid primary key references bot_instances(id) on delete cascade,
+  automations jsonb not null default '{}'::jsonb,
+  protect jsonb not null default '{}'::jsonb,
+  cloud jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists backup_snapshots (
+  id bigserial primary key,
+  bot_instance_id uuid not null references bot_instances(id) on delete cascade,
+  snapshot jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
 alter table dashboard_sessions enable row level security;
 alter table bot_instances enable row level security;
 alter table guild_resources enable row level security;
@@ -188,3 +203,5 @@ alter table payment_orders enable row level security;
 alter table tickets enable row level security;
 alter table cart_items enable row level security;
 alter table bot_logs enable row level security;
+alter table feature_settings enable row level security;
+alter table backup_snapshots enable row level security;

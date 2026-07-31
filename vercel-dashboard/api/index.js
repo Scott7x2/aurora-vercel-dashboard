@@ -474,6 +474,125 @@ async function ensureCommerceSchema() {
   await query('alter table payment_orders enable row level security');
 }
 
+async function ensureFeatureSchema() {
+  await query(`
+    create table if not exists feature_settings (
+      bot_instance_id uuid primary key references bot_instances(id) on delete cascade,
+      automations jsonb not null default '{}'::jsonb,
+      protect jsonb not null default '{}'::jsonb,
+      cloud jsonb not null default '{}'::jsonb,
+      updated_at timestamptz not null default now()
+    )
+  `);
+  await query(`
+    create table if not exists backup_snapshots (
+      id bigserial primary key,
+      bot_instance_id uuid not null references bot_instances(id) on delete cascade,
+      snapshot jsonb not null default '{}'::jsonb,
+      created_at timestamptz not null default now()
+    )
+  `);
+  await query('alter table feature_settings enable row level security');
+  await query('alter table backup_snapshots enable row level security');
+}
+
+function featureDefaults() {
+  return {
+    automations: {
+      repost_enabled: false,
+      auto_message_enabled: false,
+      auto_message_channel_id: '',
+      auto_message_text: 'Ola {server}! Confira as novidades da loja.',
+      auto_message_interval_minutes: 60,
+      cleanup_enabled: false,
+      cleanup_bad_words: '',
+      cleanup_delete_invites: false,
+      lock_enabled: false,
+      lock_channel_ids: [],
+      invite_tracker_enabled: false,
+      restock_alert_enabled: true
+    },
+    protect: {
+      moderation_enabled: true,
+      log_deleted_messages: true,
+      anti_raid_enabled: false,
+      anti_raid_join_limit: 5,
+      anti_raid_window_seconds: 20,
+      anti_raid_lockdown: false,
+      anti_fake_enabled: false,
+      anti_fake_min_account_days: 7,
+      anti_fake_action: 'log'
+    },
+    cloud: {
+      backup_enabled: true,
+      backup_interval_hours: 24
+    }
+  };
+}
+
+function mergeFeatures(row) {
+  const defaults = featureDefaults();
+  return {
+    automations: { ...defaults.automations, ...(row?.automations || {}) },
+    protect: { ...defaults.protect, ...(row?.protect || {}) },
+    cloud: { ...defaults.cloud, ...(row?.cloud || {}) },
+    updated_at: row?.updated_at || null
+  };
+}
+
+async function ensureFeatures(instanceId) {
+  await ensureFeatureSchema();
+  await query('insert into feature_settings (bot_instance_id) values ($1) on conflict (bot_instance_id) do nothing', [instanceId]);
+  return mergeFeatures(await one('select * from feature_settings where bot_instance_id=$1', [instanceId]));
+}
+
+function bool(value) {
+  return Boolean(value);
+}
+
+function minutes(value, fallback = 60, min = 5, max = 1440) {
+  return integerOrNull(value, min, max) ?? fallback;
+}
+
+function seconds(value, fallback = 20, min = 5, max = 600) {
+  return integerOrNull(value, min, max) ?? fallback;
+}
+
+function sanitizeFeatures(body = {}) {
+  const current = featureDefaults();
+  return {
+    automations: {
+      repost_enabled: bool(body.automations?.repost_enabled),
+      auto_message_enabled: bool(body.automations?.auto_message_enabled),
+      auto_message_channel_id: snowflake(body.automations?.auto_message_channel_id),
+      auto_message_text: text(body.automations?.auto_message_text || current.automations.auto_message_text, 1500),
+      auto_message_interval_minutes: minutes(body.automations?.auto_message_interval_minutes, 60),
+      cleanup_enabled: bool(body.automations?.cleanup_enabled),
+      cleanup_bad_words: text(body.automations?.cleanup_bad_words || '', 1000),
+      cleanup_delete_invites: bool(body.automations?.cleanup_delete_invites),
+      lock_enabled: bool(body.automations?.lock_enabled),
+      lock_channel_ids: arrayOfSnowflakes(body.automations?.lock_channel_ids),
+      invite_tracker_enabled: bool(body.automations?.invite_tracker_enabled),
+      restock_alert_enabled: body.automations?.restock_alert_enabled !== false
+    },
+    protect: {
+      moderation_enabled: body.protect?.moderation_enabled !== false,
+      log_deleted_messages: body.protect?.log_deleted_messages !== false,
+      anti_raid_enabled: bool(body.protect?.anti_raid_enabled),
+      anti_raid_join_limit: integerOrNull(body.protect?.anti_raid_join_limit, 2, 50) ?? 5,
+      anti_raid_window_seconds: seconds(body.protect?.anti_raid_window_seconds, 20),
+      anti_raid_lockdown: bool(body.protect?.anti_raid_lockdown),
+      anti_fake_enabled: bool(body.protect?.anti_fake_enabled),
+      anti_fake_min_account_days: integerOrNull(body.protect?.anti_fake_min_account_days, 1, 3650) ?? 7,
+      anti_fake_action: body.protect?.anti_fake_action === 'kick' ? 'kick' : 'log'
+    },
+    cloud: {
+      backup_enabled: body.cloud?.backup_enabled !== false,
+      backup_interval_hours: integerOrNull(body.cloud?.backup_interval_hours, 1, 168) ?? 24
+    }
+  };
+}
+
 app.get('/app.css', (_, res) => res.sendFile(path.join(publicDir, 'app.css')));
 app.get('/app.js', (_, res) => res.type('application/javascript').sendFile(path.join(publicDir, 'app.js')));
 
@@ -695,7 +814,74 @@ app.get('/api/instances/:id/settings', async (req, res, next) => {
     const settings = await ensureSettings(instance.id);
     const products = await query('select * from products where bot_instance_id = $1 order by created_at desc', [instance.id]);
     const payment = publicPayment(await ensurePayment(instance.id));
-    res.json({ settings, products, payment });
+    const features = await ensureFeatures(instance.id);
+    res.json({ settings, products, payment, features });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/instances/:id/features', async (req, res, next) => {
+  try {
+    const user = await requireSession(req, res);
+    if (!user) return;
+    const instance = await getInstance(req.params.id, user.discord_id);
+    if (!instance) return res.status(404).json({ error: 'not_found' });
+    res.json(await ensureFeatures(instance.id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/instances/:id/features', async (req, res, next) => {
+  try {
+    const user = await requireSession(req, res);
+    if (!user) return;
+    const instance = await getInstance(req.params.id, user.discord_id);
+    if (!instance) return res.status(404).json({ error: 'not_found' });
+    await ensureFeatureSchema();
+    const payload = sanitizeFeatures(req.body || {});
+    const saved = await one(`
+      insert into feature_settings (bot_instance_id,automations,protect,cloud,updated_at)
+      values ($1,$2::jsonb,$3::jsonb,$4::jsonb,now())
+      on conflict (bot_instance_id) do update set
+        automations=excluded.automations,
+        protect=excluded.protect,
+        cloud=excluded.cloud,
+        updated_at=now()
+      returning *
+    `, [instance.id, JSON.stringify(payload.automations), JSON.stringify(payload.protect), JSON.stringify(payload.cloud)]);
+    res.json(mergeFeatures(saved));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/instances/:id/backup', async (req, res, next) => {
+  try {
+    const user = await requireSession(req, res);
+    if (!user) return;
+    const instance = await getInstance(req.params.id, user.discord_id);
+    if (!instance) return res.status(404).json({ error: 'not_found' });
+    await ensureFeatureSchema();
+    const [settings, features, products, payment, resources] = await Promise.all([
+      ensureSettings(instance.id),
+      ensureFeatures(instance.id),
+      query('select * from products where bot_instance_id=$1 order by created_at desc', [instance.id]),
+      ensurePayment(instance.id),
+      one('select channels,roles,updated_at from guild_resources where bot_instance_id=$1', [instance.id])
+    ]);
+    const snapshot = {
+      instance: publicInstance(instance),
+      settings,
+      features,
+      products,
+      payment: publicPayment(payment),
+      resources,
+      created_by: user.discord_id
+    };
+    const saved = await one('insert into backup_snapshots (bot_instance_id,snapshot) values ($1,$2::jsonb) returning id,created_at', [instance.id, JSON.stringify(snapshot)]);
+    res.json({ ok: true, backup: saved });
   } catch (error) {
     next(error);
   }

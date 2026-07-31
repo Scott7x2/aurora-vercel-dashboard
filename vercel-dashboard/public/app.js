@@ -1,4 +1,4 @@
-const state = { me: null, guilds: [], instances: [], guild: null, instance: null, resources: { channels: [], roles: [] }, settings: null, payment: null, products: [], logs: [], logFilter: 'todos' };
+const state = { me: null, guilds: [], instances: [], guild: null, instance: null, resources: { channels: [], roles: [] }, settings: null, features: null, payment: null, products: [], logs: [], logFilter: 'todos' };
 const ids = [
   'brand_name', 'brand_color', 'auto_role_id', 'verified_role_id', 'remove_auto_role_after_verify',
   'welcome_channel_id', 'welcome_mode', 'welcome_color', 'welcome_title', 'welcome_message',
@@ -65,6 +65,66 @@ function read(id) {
   if (node.type === 'checkbox') return node.checked;
   if (node.multiple) return [...node.selectedOptions].map((item) => item.value).filter(Boolean);
   return node.value;
+}
+
+function writeFeature(path, value) {
+  const node = $(path);
+  if (!node) return;
+  if (node.type === 'checkbox') node.checked = Boolean(value);
+  else if (node.type === 'number') node.value = value ?? '';
+  else if (node.multiple) {
+    const selected = new Set(value || []);
+    [...node.options].forEach((item) => { item.selected = selected.has(item.value); });
+  } else node.value = value || '';
+}
+
+function readFeature(id) {
+  return read(id);
+}
+
+function renderFeatures() {
+  const features = state.features || {};
+  const auto = features.automations || {};
+  const protect = features.protect || {};
+  const cloud = features.cloud || {};
+  Object.entries(auto).forEach(([key, value]) => writeFeature(`feature_${key}`, value));
+  Object.entries(protect).forEach(([key, value]) => writeFeature(`protect_${key}`, value));
+  Object.entries(cloud).forEach(([key, value]) => writeFeature(`cloud_${key}`, value));
+  if ($('featureUpdatedAt')) $('featureUpdatedAt').textContent = features.updated_at ? `Atualizado em ${new Date(features.updated_at).toLocaleString('pt-BR')}` : 'Ainda nao salvo.';
+}
+
+function featurePayload() {
+  return {
+    automations: {
+      repost_enabled: readFeature('feature_repost_enabled'),
+      auto_message_enabled: readFeature('feature_auto_message_enabled'),
+      auto_message_channel_id: readFeature('feature_auto_message_channel_id'),
+      auto_message_text: readFeature('feature_auto_message_text'),
+      auto_message_interval_minutes: readFeature('feature_auto_message_interval_minutes'),
+      cleanup_enabled: readFeature('feature_cleanup_enabled'),
+      cleanup_bad_words: readFeature('feature_cleanup_bad_words'),
+      cleanup_delete_invites: readFeature('feature_cleanup_delete_invites'),
+      lock_enabled: readFeature('feature_lock_enabled'),
+      lock_channel_ids: readFeature('feature_lock_channel_ids'),
+      invite_tracker_enabled: readFeature('feature_invite_tracker_enabled'),
+      restock_alert_enabled: readFeature('feature_restock_alert_enabled')
+    },
+    protect: {
+      moderation_enabled: readFeature('protect_moderation_enabled'),
+      log_deleted_messages: readFeature('protect_log_deleted_messages'),
+      anti_raid_enabled: readFeature('protect_anti_raid_enabled'),
+      anti_raid_join_limit: readFeature('protect_anti_raid_join_limit'),
+      anti_raid_window_seconds: readFeature('protect_anti_raid_window_seconds'),
+      anti_raid_lockdown: readFeature('protect_anti_raid_lockdown'),
+      anti_fake_enabled: readFeature('protect_anti_fake_enabled'),
+      anti_fake_min_account_days: readFeature('protect_anti_fake_min_account_days'),
+      anti_fake_action: readFeature('protect_anti_fake_action')
+    },
+    cloud: {
+      backup_enabled: readFeature('cloud_backup_enabled'),
+      backup_interval_hours: readFeature('cloud_backup_interval_hours')
+    }
+  };
 }
 
 function header() {
@@ -190,6 +250,8 @@ function renderSavedBots() {
 function renderResources() {
   document.querySelectorAll('[data-kind="role"]').forEach((select) => fill(select, state.resources.roles || [], state.settings?.[select.id], select.multiple ? '' : 'Nenhum cargo'));
   document.querySelectorAll('[data-kind="channel"]').forEach((select) => fill(select, state.resources.channels || [], state.settings?.[select.id], 'Nenhum canal'));
+  document.querySelectorAll('[data-feature-kind="channel"]').forEach((select) => fill(select, state.resources.channels || [], state.features?.automations?.[select.dataset.featureValue || select.id.replace('feature_', '')], 'Nenhum canal'));
+  document.querySelectorAll('[data-feature-kind="channels"]').forEach((select) => fill(select, state.resources.channels || [], state.features?.automations?.[select.dataset.featureValue || select.id.replace('feature_', '')], ''));
   renderOverview();
 }
 
@@ -479,15 +541,18 @@ async function refreshResources() {
 async function loadSettings() {
   if (!state.instance) {
     state.settings = null;
+    state.features = null;
     state.payment = null;
     state.products = [];
   } else {
     const data = await api(`/api/instances/${state.instance.id}/settings`);
     state.settings = data.settings;
+    state.features = data.features;
     state.payment = data.payment;
     state.products = data.products;
   }
   renderSettings();
+  renderFeatures();
   renderPayment();
   renderProducts();
   await loadLogs().catch(() => null);
@@ -596,6 +661,22 @@ async function savePayment() {
   msg('Recebimento salvo com seguranca.');
 }
 
+async function saveFeatures() {
+  if (!state.instance) return msg('Salve o bot antes de configurar automacoes.', true);
+  state.features = await api(`/api/instances/${state.instance.id}/features`, {
+    method: 'PUT',
+    body: JSON.stringify(featurePayload())
+  });
+  renderFeatures();
+  msg('Automacoes, Protect e Cloud salvos. O runner aplica em poucos segundos.');
+}
+
+async function createBackup() {
+  if (!state.instance) return msg('Salve o bot antes de criar backup.', true);
+  const data = await api(`/api/instances/${state.instance.id}/backup`, { method: 'POST', body: JSON.stringify({}) });
+  msg(`Backup criado no Supabase. ID: ${data.backup?.id || 'ok'}.`);
+}
+
 function publishChannelFor(type) {
   const manual = read('publishChannel');
   if (manual) return manual;
@@ -688,6 +769,10 @@ function bind() {
   $('productType').onchange = renderProductMode;
   $('paymentProvider').onchange = renderPaymentMode;
   $('savePayment').onclick = () => savePayment().catch((error) => msg(error.message, true));
+  document.querySelectorAll('[data-save-features]').forEach((button) => {
+    button.onclick = () => saveFeatures().catch((error) => msg(error.message, true));
+  });
+  if ($('createBackup')) $('createBackup').onclick = () => createBackup().catch((error) => msg(error.message, true));
   $('reloadLogs').onclick = () => loadLogs().catch((error) => msg(error.message, true));
   document.querySelectorAll('[data-log-filter]').forEach((button) => {
     button.onclick = () => {
