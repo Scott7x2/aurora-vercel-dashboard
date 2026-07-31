@@ -102,12 +102,18 @@
           </div>
           <label class="check"><input id="remove_auto_role_after_verify" type="checkbox"> Remover cargo automatico apos verificar</label>
           <div class="grid">
+            <label><span>Tipo boas-vindas</span><select id="welcome_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
+            <label><span>Cor boas-vindas</span><input id="welcome_color" type="color"></label>
             <label><span>Titulo boas-vindas</span><input id="welcome_title"></label>
+            <label><span>Tipo verificacao</span><select id="auth_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
+            <label><span>Cor verificacao</span><input id="auth_color" type="color"></label>
             <label><span>Titulo verificacao</span><input id="auth_title"></label>
             <label><span>Texto botao</span><input id="auth_button_label"></label>
           </div>
           <label><span>Mensagem boas-vindas</span><textarea id="welcome_message" rows="4"></textarea></label>
+          <div id="welcome_preview" class="message-preview"></div>
           <label><span>Mensagem verificacao</span><textarea id="auth_message" rows="4"></textarea></label>
+          <div id="auth_preview" class="message-preview"></div>
         </section>
 
         <section id="tab-tickets" class="tab">
@@ -115,19 +121,25 @@
           <div class="grid">
             <label><span>Canal base</span><select id="ticket_channel_id" data-kind="channel"></select></label>
             <label><span>Cargos suporte</span><select id="support_role_ids" data-kind="role" multiple size="5"></select></label>
+            <label><span>Tipo mensagem ticket</span><select id="ticket_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
+            <label><span>Cor ticket</span><input id="ticket_color" type="color"></label>
             <label><span>Titulo</span><input id="ticket_title"></label>
             <label><span>Texto botao</span><input id="ticket_button_label"></label>
           </div>
           <label><span>Mensagem tickets</span><textarea id="ticket_message" rows="5"></textarea></label>
+          <div id="ticket_preview" class="message-preview"></div>
         </section>
 
         <section id="tab-sales" class="tab">
           <div class="head"><div><h2>Vendas e produtos</h2><p>Produtos viram botoes no painel de vendas.</p></div></div>
           <div class="grid">
             <label><span>Canal vitrine</span><select id="sales_channel_id" data-kind="channel"></select></label>
+            <label><span>Tipo vitrine</span><select id="sales_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
+            <label><span>Cor vitrine</span><input id="sales_color" type="color"></label>
             <label><span>Titulo vitrine</span><input id="sales_title"></label>
           </div>
           <label><span>Mensagem vendas</span><textarea id="sales_message" rows="4"></textarea></label>
+          <div id="sales_preview" class="message-preview"></div>
           <div class="product-form">
             <input id="productName" placeholder="Produto">
             <input id="productPrice" placeholder="Preco">

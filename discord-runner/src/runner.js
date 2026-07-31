@@ -83,12 +83,20 @@ function btn(id, label, style, emojiText) {
   return button;
 }
 
-function embed(settings, title, description) {
+function validColor(value, fallback) {
+  return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value) : fallback;
+}
+
+function embed(settings, title, description, color) {
   return new EmbedBuilder()
-    .setColor(/^#[0-9a-f]{6}$/i.test(settings.brand_color || '') ? settings.brand_color : '#5865f2')
+    .setColor(validColor(color, validColor(settings.brand_color, '#5865f2')))
     .setTitle(title || settings.brand_name || 'Aurora')
     .setDescription(description || '')
     .setFooter({ text: settings.brand_name || 'Aurora Store' });
+}
+
+function messageMode(value) {
+  return value === 'simple' ? 'simple' : 'embed';
 }
 
 function roleName(guild, id) {
@@ -138,6 +146,21 @@ function renderTemplate(template, context = {}) {
     time: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   };
   return String(template || '').replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key) => vars[key] ?? '');
+}
+
+function messagePayload(settings, options = {}) {
+  const context = options.context || {};
+  const title = renderTemplate(options.title || '', context);
+  const description = renderTemplate(options.description || '', context);
+  const components = options.components || [];
+  if (messageMode(options.mode) === 'simple') {
+    const content = `${title ? `**${title}**\n` : ''}${description}`.trim() || title || description || ' ';
+    return { content, components };
+  }
+  return {
+    embeds: [embed(settings, title, description, options.color)],
+    components
+  };
 }
 
 async function setError(id, message) {
@@ -196,16 +219,24 @@ async function panel(instanceId, type, context = {}) {
   const settings = await getSettings(instanceId);
   context.settings = settings;
   if (type === 'auth') {
-    return {
-      embeds: [embed(settings, renderTemplate(settings.auth_title, context), renderTemplate(settings.auth_message, context))],
+    return messagePayload(settings, {
+      mode: settings.auth_mode,
+      color: settings.auth_color,
+      title: settings.auth_title,
+      description: settings.auth_message,
+      context,
       components: [row(btn('az:auth', renderTemplate(settings.auth_button_label, context), ButtonStyle.Success, settings.button_emoji))]
-    };
+    });
   }
   if (type === 'ticket') {
-    return {
-      embeds: [embed(settings, renderTemplate(settings.ticket_title, context), renderTemplate(settings.ticket_message, context))],
+    return messagePayload(settings, {
+      mode: settings.ticket_mode,
+      color: settings.ticket_color,
+      title: settings.ticket_title,
+      description: settings.ticket_message,
+      context,
       components: [row(btn('az:ticket', renderTemplate(settings.ticket_button_label, context), ButtonStyle.Primary, settings.button_emoji))]
-    };
+    });
   }
   const items = await products(instanceId);
   const rows = [];
@@ -214,7 +245,14 @@ async function panel(instanceId, type, context = {}) {
     rows[n] ||= new ActionRowBuilder();
     rows[n].addComponents(btn(`az:buy:${item.id}`, renderTemplate(item.name, { ...context, product: item }), ButtonStyle.Success, settings.button_emoji));
   });
-  return { embeds: [embed(settings, renderTemplate(settings.sales_title, context), renderTemplate(settings.sales_message, context))], components: rows };
+  return messagePayload(settings, {
+    mode: settings.sales_mode,
+    color: settings.sales_color,
+    title: settings.sales_title,
+    description: settings.sales_message,
+    context,
+    components: rows
+  });
 }
 
 async function addTicketMembers(thread, interaction, settings) {
@@ -253,7 +291,8 @@ async function openTicket(interaction, instance, productId = null) {
       renderTemplate(item ? 'Novo pedido de {user}' : 'Novo ticket de {user}', { interaction, settings, product: item, thread }),
       item
         ? renderTemplate(`Produto: **{product}**\nPreco: **{price}**\n{productDescription}`, { interaction, settings, product: item, thread })
-        : renderTemplate('Ola {user}, descreva o atendimento. {supportRoleMentions}', { interaction, settings, thread })
+        : renderTemplate('Ola {user}, descreva o atendimento. {supportRoleMentions}', { interaction, settings, thread }),
+      settings.ticket_color
     )],
     components: [row(btn('az:close', 'Fechar ticket', ButtonStyle.Danger, settings.button_emoji))]
   });
@@ -333,13 +372,17 @@ async function start(instance) {
         if (!settings.welcome_channel_id) return;
         const channel = await member.guild.channels.fetch(settings.welcome_channel_id).catch(() => null);
         if (!channel?.isTextBased?.()) return;
-        await channel.send({
-          embeds: [embed(
-            settings,
-            renderTemplate(settings.welcome_title, { member, settings, channel }),
-            renderTemplate(settings.welcome_message, { member, settings, channel })
-          )]
-        }).catch(() => null);
+        await channel.send(messagePayload(settings, {
+          mode: settings.welcome_mode,
+          color: settings.welcome_color,
+          title: settings.welcome_title,
+          description: settings.welcome_message,
+          context: { member, settings, channel }
+        })).catch((error) => {
+          const message = `Falha ao enviar boas-vindas: ${error.message}. Verifique permissoes no canal configurado.`;
+          console.error(`[${runnerName}] ${message}`);
+          setWarning(instance.id, message).catch(console.error);
+        });
       });
     }
 

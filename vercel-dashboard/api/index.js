@@ -135,6 +135,14 @@ function emojiName(value) {
   return text(value || 'aurora', 32).toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^_+|_+$/g, '') || 'aurora';
 }
 
+function messageMode(value) {
+  return value === 'simple' ? 'simple' : 'embed';
+}
+
+function hexColor(value, fallback = '#5865f2') {
+  return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value) : fallback;
+}
+
 function hasManageGuild(guild) {
   if (guild.owner) return true;
   try {
@@ -509,18 +517,26 @@ app.put('/api/instances/:id/settings', async (req, res, next) => {
       snowflake(body.verified_role_id),
       Boolean(body.remove_auto_role_after_verify),
       snowflake(body.welcome_channel_id),
+      messageMode(body.welcome_mode),
+      hexColor(body.welcome_color, hexColor(body.brand_color)),
       text(body.welcome_title || 'Novo membro', 100),
       text(body.welcome_message || '', 1500),
       snowflake(body.auth_channel_id),
+      messageMode(body.auth_mode),
+      hexColor(body.auth_color, hexColor(body.brand_color)),
       text(body.auth_title || 'Autenticacao', 100),
       text(body.auth_message || '', 1500),
       text(body.auth_button_label || 'Verificar acesso', 80),
       snowflake(body.ticket_channel_id),
       json(arrayOfSnowflakes(body.support_role_ids)),
+      messageMode(body.ticket_mode),
+      hexColor(body.ticket_color, hexColor(body.brand_color)),
       text(body.ticket_title || 'Atendimento', 100),
       text(body.ticket_message || '', 1500),
       text(body.ticket_button_label || 'Abrir ticket', 80),
       snowflake(body.sales_channel_id),
+      messageMode(body.sales_mode),
+      hexColor(body.sales_color, hexColor(body.brand_color)),
       text(body.sales_title || 'Vitrine', 100),
       text(body.sales_message || '', 1500),
       text(body.button_emoji || '', 120)
@@ -528,19 +544,24 @@ app.put('/api/instances/:id/settings', async (req, res, next) => {
     const saved = await one(`
       insert into bot_settings (
         bot_instance_id,brand_name,brand_color,auto_role_id,verified_role_id,remove_auto_role_after_verify,
-        welcome_channel_id,welcome_title,welcome_message,auth_channel_id,auth_title,auth_message,auth_button_label,
-        ticket_channel_id,support_role_ids,ticket_title,ticket_message,ticket_button_label,
-        sales_channel_id,sales_title,sales_message,button_emoji,updated_at
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19,$20,$21,$22,now())
+        welcome_channel_id,welcome_mode,welcome_color,welcome_title,welcome_message,
+        auth_channel_id,auth_mode,auth_color,auth_title,auth_message,auth_button_label,
+        ticket_channel_id,support_role_ids,ticket_mode,ticket_color,ticket_title,ticket_message,ticket_button_label,
+        sales_channel_id,sales_mode,sales_color,sales_title,sales_message,button_emoji,updated_at
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,now())
       on conflict (bot_instance_id) do update set
         brand_name=excluded.brand_name, brand_color=excluded.brand_color, auto_role_id=excluded.auto_role_id,
         verified_role_id=excluded.verified_role_id, remove_auto_role_after_verify=excluded.remove_auto_role_after_verify,
-        welcome_channel_id=excluded.welcome_channel_id, welcome_title=excluded.welcome_title, welcome_message=excluded.welcome_message,
-        auth_channel_id=excluded.auth_channel_id, auth_title=excluded.auth_title, auth_message=excluded.auth_message,
+        welcome_channel_id=excluded.welcome_channel_id, welcome_mode=excluded.welcome_mode,
+        welcome_color=excluded.welcome_color, welcome_title=excluded.welcome_title, welcome_message=excluded.welcome_message,
+        auth_channel_id=excluded.auth_channel_id, auth_mode=excluded.auth_mode, auth_color=excluded.auth_color,
+        auth_title=excluded.auth_title, auth_message=excluded.auth_message,
         auth_button_label=excluded.auth_button_label, ticket_channel_id=excluded.ticket_channel_id,
-        support_role_ids=excluded.support_role_ids, ticket_title=excluded.ticket_title, ticket_message=excluded.ticket_message,
+        support_role_ids=excluded.support_role_ids, ticket_mode=excluded.ticket_mode, ticket_color=excluded.ticket_color,
+        ticket_title=excluded.ticket_title, ticket_message=excluded.ticket_message,
         ticket_button_label=excluded.ticket_button_label, sales_channel_id=excluded.sales_channel_id,
-        sales_title=excluded.sales_title, sales_message=excluded.sales_message, button_emoji=excluded.button_emoji, updated_at=now()
+        sales_mode=excluded.sales_mode, sales_color=excluded.sales_color, sales_title=excluded.sales_title,
+        sales_message=excluded.sales_message, button_emoji=excluded.button_emoji, updated_at=now()
       returning *
     `, values);
     res.json(saved);

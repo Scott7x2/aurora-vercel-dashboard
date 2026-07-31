@@ -1,9 +1,10 @@
 const state = { me: null, guilds: [], instances: [], guild: null, instance: null, resources: { channels: [], roles: [] }, settings: null, products: [] };
 const ids = [
   'brand_name', 'brand_color', 'auto_role_id', 'verified_role_id', 'remove_auto_role_after_verify',
-  'welcome_channel_id', 'welcome_title', 'welcome_message', 'auth_channel_id', 'auth_title',
-  'auth_message', 'auth_button_label', 'ticket_channel_id', 'support_role_ids', 'ticket_title',
-  'ticket_message', 'ticket_button_label', 'sales_channel_id', 'sales_title', 'sales_message',
+  'welcome_channel_id', 'welcome_mode', 'welcome_color', 'welcome_title', 'welcome_message',
+  'auth_channel_id', 'auth_mode', 'auth_color', 'auth_title',
+  'auth_message', 'auth_button_label', 'ticket_channel_id', 'support_role_ids', 'ticket_mode', 'ticket_color', 'ticket_title',
+  'ticket_message', 'ticket_button_label', 'sales_channel_id', 'sales_mode', 'sales_color', 'sales_title', 'sales_message',
   'button_emoji'
 ];
 const $ = (id) => document.getElementById(id);
@@ -43,6 +44,8 @@ function write(id, value) {
   const node = $(id);
   if (!node) return;
   if (node.type === 'checkbox') node.checked = Boolean(value);
+  else if (node.type === 'color') node.value = /^#[0-9a-f]{6}$/i.test(value || '') ? value : '#5865f2';
+  else if (id.endsWith('_mode')) node.value = value === 'simple' ? 'simple' : 'embed';
   else if (node.multiple) {
     const selected = new Set(value || []);
     [...node.options].forEach((item) => { item.selected = selected.has(item.value); });
@@ -168,9 +171,88 @@ function renderResources() {
   document.querySelectorAll('[data-kind="channel"]').forEach((select) => fill(select, state.resources.channels || [], state.settings?.[select.id], 'Nenhum canal'));
 }
 
+function sampleVars() {
+  const firstChannel = state.resources.channels?.[0];
+  const autoRole = state.resources.roles?.find((role) => role.id === read('auto_role_id'));
+  const verifiedRole = state.resources.roles?.find((role) => role.id === read('verified_role_id'));
+  return {
+    user: '@Scott',
+    userMention: '@Scott',
+    userId: '1234567890',
+    username: 'Scott',
+    server: state.guild?.name || 'Aurora Store',
+    guild: state.guild?.name || 'Aurora Store',
+    memberCount: '128',
+    channel: firstChannel ? `#${firstChannel.name}` : '#geral',
+    channelMention: firstChannel ? `#${firstChannel.name}` : '#geral',
+    channelName: firstChannel?.name || 'geral',
+    owner: '@Dono',
+    autoRole: autoRole?.name || 'Visitante',
+    autoRoleMention: autoRole ? `@${autoRole.name}` : '@Visitante',
+    verifiedRole: verifiedRole?.name || 'Membro',
+    verifiedRoleMention: verifiedRole ? `@${verifiedRole.name}` : '@Membro',
+    supportRoles: 'Suporte',
+    supportRoleMentions: '@Suporte',
+    welcomeChannel: '#boas-vindas',
+    authChannel: '#verificacao',
+    ticketChannel: '#tickets',
+    salesChannel: '#vendas',
+    product: 'Produto Exemplo',
+    price: 'R$ 19,90',
+    productDescription: 'Descricao curta do produto.',
+    ticket: '#ticket-scott',
+    ticketId: '0001',
+    emoji: read('button_emoji') || '✨',
+    date: new Date().toLocaleDateString('pt-BR'),
+    time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  };
+}
+
+function renderTemplatePreview(template) {
+  const vars = sampleVars();
+  return String(template || '').replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key) => vars[key] ?? '');
+}
+
+function renderMessagePreview(prefix) {
+  const box = $(`${prefix}_preview`);
+  if (!box) return;
+  const mode = read(`${prefix}_mode`) || 'embed';
+  const color = read(`${prefix}_color`) || read('brand_color') || '#5865f2';
+  const title = renderTemplatePreview(read(`${prefix}_title`));
+  const body = renderTemplatePreview(read(`${prefix}_message`));
+  box.innerHTML = '';
+  box.className = `message-preview ${mode === 'simple' ? 'simple' : 'embed'}`;
+  const label = document.createElement('small');
+  label.textContent = mode === 'simple' ? 'Previa: mensagem simples' : 'Previa: embed';
+  box.appendChild(label);
+  if (mode === 'simple') {
+    const content = document.createElement('div');
+    content.className = 'preview-simple';
+    content.textContent = `${title ? `${title}\n` : ''}${body}`.trim() || 'Sua mensagem aparecera aqui.';
+    box.appendChild(content);
+    return;
+  }
+  const embedBox = document.createElement('div');
+  embedBox.className = 'preview-embed';
+  embedBox.style.borderLeftColor = color;
+  const embedTitle = document.createElement('strong');
+  embedTitle.textContent = title || read('brand_name') || 'Aurora Store';
+  const embedBody = document.createElement('p');
+  embedBody.textContent = body || 'Sua mensagem aparecera aqui.';
+  const footer = document.createElement('span');
+  footer.textContent = read('brand_name') || 'Aurora Store';
+  embedBox.append(embedTitle, embedBody, footer);
+  box.appendChild(embedBox);
+}
+
+function renderPreviews() {
+  ['welcome', 'auth', 'ticket', 'sales'].forEach(renderMessagePreview);
+}
+
 function renderSettings() {
   ids.forEach((id) => write(id, state.settings?.[id]));
   renderResources();
+  renderPreviews();
 }
 
 function renderProducts() {
@@ -321,6 +403,7 @@ async function saveSettings() {
   const payload = Object.fromEntries(ids.map((id) => [id, read(id)]));
   state.settings = await api(`/api/instances/${state.instance.id}/settings`, { method: 'PUT', body: JSON.stringify(payload) });
   $('saveState').textContent = 'Salvo.';
+  renderPreviews();
   msg('Configuracoes salvas.');
 }
 
@@ -383,6 +466,12 @@ function bind() {
   $('saveSettings').onclick = () => saveSettings().catch((error) => msg(error.message, true));
   $('addProduct').onclick = () => addProduct().catch((error) => msg(error.message, true));
   $('uploadEmoji').onclick = () => uploadEmoji().catch((error) => msg(error.message, true));
+  ids.forEach((id) => {
+    const node = $(id);
+    if (!node) return;
+    node.addEventListener('input', renderPreviews);
+    node.addEventListener('change', renderPreviews);
+  });
 }
 
 async function init() {
