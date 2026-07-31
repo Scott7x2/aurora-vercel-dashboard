@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Aurora Sales</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <div class="layout">
+      <aside>
+        <div class="logo">
+          <span>A</span>
+          <div><strong>Aurora</strong><small>Sales Control Center</small></div>
+        </div>
+        <label>Servidor</label>
+        <select id="guildSelect"></select>
+        <div class="state">
+          <i id="botDot"></i>
+          <div><strong id="botName">Sem bot</strong><small id="botState">Configure uma instancia</small></div>
+        </div>
+        <nav>
+          <button class="active" data-tab="bot">Bot</button>
+          <button data-tab="saved">Bots salvos</button>
+          <button data-tab="auth">Autenticacao</button>
+          <button data-tab="tickets">Tickets</button>
+          <button data-tab="sales">Vendas</button>
+          <button data-tab="identity">Identidade</button>
+          <button data-tab="variables">Variaveis</button>
+        </nav>
+        <a href="/logout">Sair</a>
+      </aside>
+      <main>
+        <header>
+          <div>
+            <p id="crumb">Painel</p>
+            <h1>Central de configuracoes</h1>
+          </div>
+          <span id="me"></span>
+        </header>
+        <div id="notice"></div>
+
+        <section id="tab-bot" class="tab active">
+          <div class="head">
+            <div><h2>Bot separado por servidor</h2><p>Ao salvar um token valido, o bot e ativado automaticamente. A central 24h hospedada por voce inicia essa instancia em poucos segundos.</p></div>
+            <label class="switch"><input id="enabled" type="checkbox"><span></span></label>
+          </div>
+          <div class="saved-help">
+            <strong>Inicializacao pelo site</strong>
+            <p>O usuario nao precisa baixar nada. Ele salva o token aqui, clica para ativar e a central 24h liga o bot automaticamente. O Vercel cuida do painel; o runner hospedado separadamente mantem os bots conectados ao Discord.</p>
+          </div>
+          <div class="grid">
+            <label><span>Nome</span><input id="instanceName" placeholder="Aurora Sales"></label>
+            <label><span>Token do bot</span><input id="botToken" type="password" placeholder="Cole somente ao criar/trocar"></label>
+          </div>
+          <div class="actions">
+            <button id="saveInstance" class="primary">Salvar bot</button>
+            <button id="reloadResources">Atualizar cargos e canais</button>
+          </div>
+          <a id="inviteBot" class="invite-link disabled" href="#" target="_blank" rel="noreferrer">Adicionar bot ao servidor</a>
+          <div class="tutorial-card">
+            <h3>Como pegar o token do seu proprio bot</h3>
+            <ol>
+              <li>Acesse <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a>.</li>
+              <li>Clique em <strong>New Application</strong>, escolha um nome e confirme.</li>
+              <li>Entre em <strong>Bot</strong> e clique em <strong>Add Bot</strong>, se ainda nao existir.</li>
+              <li>Em <strong>Token</strong>, clique em <strong>Reset Token</strong> ou <strong>Copy Token</strong>.</li>
+              <li>Cole esse token no campo acima e clique em <strong>Salvar bot</strong>.</li>
+              <li>Em <strong>Bot</strong>, ative <strong>Server Members Intent</strong> para autorole e boas-vindas.</li>
+              <li>Em <strong>OAuth2 > URL Generator</strong>, marque <strong>bot</strong> e <strong>applications.commands</strong>, escolha as permissoes e convide para o servidor.</li>
+            </ol>
+            <p>Permissoes recomendadas: Manage Roles, Manage Channels, Manage Expressions, Create Private Threads, Send Messages, Use Slash Commands e Embed Links.</p>
+          </div>
+        </section>
+
+        <section id="tab-saved" class="tab">
+          <div class="head">
+            <div>
+              <h2>Bots salvos</h2>
+              <p>Todos os bots que voce ja cadastrou ficam aqui, mesmo depois de fechar e abrir o site.</p>
+            </div>
+          </div>
+          <div class="saved-help">
+            <strong>Como usar</strong>
+            <p>Clique em <b>Abrir</b> para gerenciar um bot salvo. Se aparecer <b>Aguardando central 24h</b>, a central ainda nao iniciou essa instancia ou nao esta hospedada/ligada.</p>
+          </div>
+          <div id="savedBots" class="saved-bots"></div>
+        </section>
+
+        <section id="tab-auth" class="tab">
+          <div class="head"><div><h2>Acesso e entrada</h2><p>Autorole, verificacao e boas-vindas.</p></div></div>
+          <div class="grid">
+            <label><span>Cargo automatico</span><select id="auto_role_id" data-kind="role"></select></label>
+            <label><span>Cargo verificado</span><select id="verified_role_id" data-kind="role"></select></label>
+            <label><span>Canal boas-vindas</span><select id="welcome_channel_id" data-kind="channel"></select></label>
+            <label><span>Canal verificacao</span><select id="auth_channel_id" data-kind="channel"></select></label>
+          </div>
+          <label class="check"><input id="remove_auto_role_after_verify" type="checkbox"> Remover cargo automatico apos verificar</label>
+          <div class="grid">
+            <label><span>Titulo boas-vindas</span><input id="welcome_title"></label>
+            <label><span>Titulo verificacao</span><input id="auth_title"></label>
+            <label><span>Texto botao</span><input id="auth_button_label"></label>
+          </div>
+          <label><span>Mensagem boas-vindas</span><textarea id="welcome_message" rows="4"></textarea></label>
+          <label><span>Mensagem verificacao</span><textarea id="auth_message" rows="4"></textarea></label>
+        </section>
+
+        <section id="tab-tickets" class="tab">
+          <div class="head"><div><h2>Tickets privados</h2><p>Topico privado para membro, dono e suporte.</p></div></div>
+          <div class="grid">
+            <label><span>Canal base</span><select id="ticket_channel_id" data-kind="channel"></select></label>
+            <label><span>Cargos suporte</span><select id="support_role_ids" data-kind="role" multiple size="5"></select></label>
+            <label><span>Titulo</span><input id="ticket_title"></label>
+            <label><span>Texto botao</span><input id="ticket_button_label"></label>
+          </div>
+          <label><span>Mensagem tickets</span><textarea id="ticket_message" rows="5"></textarea></label>
+        </section>
+
+        <section id="tab-sales" class="tab">
+          <div class="head"><div><h2>Vendas e produtos</h2><p>Produtos viram botoes no painel de vendas.</p></div></div>
+          <div class="grid">
+            <label><span>Canal vitrine</span><select id="sales_channel_id" data-kind="channel"></select></label>
+            <label><span>Titulo vitrine</span><input id="sales_title"></label>
+          </div>
+          <label><span>Mensagem vendas</span><textarea id="sales_message" rows="4"></textarea></label>
+          <div class="product-form">
+            <input id="productName" placeholder="Produto">
+            <input id="productPrice" placeholder="Preco">
+            <input id="productImage" placeholder="Imagem opcional">
+            <textarea id="productDescription" rows="3" placeholder="Descricao"></textarea>
+            <button id="addProduct" class="primary">Adicionar produto</button>
+          </div>
+          <div id="products"></div>
+        </section>
+
+        <section id="tab-identity" class="tab">
+          <div class="head"><div><h2>Identidade</h2><p>Marca usada nas mensagens do Discord.</p></div></div>
+          <div class="grid">
+            <label><span>Nome da loja</span><input id="brand_name"></label>
+            <label><span>Cor</span><input id="brand_color" type="color"></label>
+            <label><span>Emoji dos botoes</span><input id="button_emoji" placeholder="Ex: ✅ ou <:aurora:123>"></label>
+          </div>
+          <div class="emoji-uploader">
+            <div>
+              <h3>Emoji personalizado</h3>
+              <p>Envie uma imagem pequena para o backend criar um emoji no servidor com o bot. O bot precisa da permissao Gerenciar Expressoes.</p>
+            </div>
+            <div class="grid">
+              <label><span>Nome do emoji</span><input id="emojiName" placeholder="aurora"></label>
+              <label><span>Imagem do emoji</span><input id="emojiFile" type="file" accept="image/png,image/jpeg,image/gif,image/webp"></label>
+            </div>
+            <button id="uploadEmoji" class="primary">Criar emoji no Discord</button>
+            <small id="emojiState"></small>
+          </div>
+          <div class="variables">
+            <h3>Variaveis para mensagens</h3>
+            <p>Use nos textos de boas-vindas, verificacao, tickets e vendas.</p>
+            <code>{user}</code><code>{userMention}</code><code>{username}</code><code>{server}</code><code>{memberCount}</code><code>{channel}</code><code>{channelMention}</code><code>{owner}</code><code>{autoRole}</code><code>{autoRoleMention}</code><code>{verifiedRole}</code><code>{verifiedRoleMention}</code><code>{supportRoles}</code><code>{supportRoleMentions}</code><code>{product}</code><code>{price}</code><code>{emoji}</code><code>{date}</code><code>{time}</code>
+          </div>
+        </section>
+
+        <section id="tab-variables" class="tab">
+          <div class="head">
+            <div>
+              <h2>Variaveis e marcacoes</h2>
+              <p>Use estes prefixos nas mensagens para marcar usuarios, cargos, canais e deixar os textos dinamicos.</p>
+            </div>
+          </div>
+          <div class="variable-groups">
+            <div class="variable-card"><h3>Membro</h3><code>{user}</code><code>{userMention}</code><code>{userId}</code><code>{username}</code><small>{user} e {userMention} marcam o usuario.</small></div>
+            <div class="variable-card"><h3>Servidor</h3><code>{server}</code><code>{guild}</code><code>{memberCount}</code><code>{owner}</code><small>{owner} marca o dono do servidor.</small></div>
+            <div class="variable-card"><h3>Canais</h3><code>{channel}</code><code>{channelMention}</code><code>{channelName}</code><code>{welcomeChannel}</code><code>{authChannel}</code><code>{ticketChannel}</code><code>{salesChannel}</code><small>{channel} marca o canal usado no contexto.</small></div>
+            <div class="variable-card"><h3>Cargos</h3><code>{autoRole}</code><code>{autoRoleMention}</code><code>{verifiedRole}</code><code>{verifiedRoleMention}</code><code>{supportRoles}</code><code>{supportRoleMentions}</code><small>Use os campos com Mention para marcar cargos.</small></div>
+            <div class="variable-card"><h3>Vendas e ticket</h3><code>{product}</code><code>{price}</code><code>{productDescription}</code><code>{ticket}</code><code>{ticketId}</code><small>Funcionam melhor em venda e abertura de ticket.</small></div>
+            <div class="variable-card"><h3>Extras</h3><code>{emoji}</code><code>{date}</code><code>{time}</code><small>{emoji} usa o emoji salvo na aba Identidade.</small></div>
+          </div>
+          <label><span>Exemplo pronto</span><textarea rows="4" readonly>Ola {user}, seja bem-vindo ao {server}! Leia o canal {channel} e aguarde o suporte {supportRoleMentions}. {emoji}</textarea></label>
+        </section>
+
+        <footer>
+          <button id="saveSettings" class="primary">Salvar configuracoes</button>
+          <small id="saveState"></small>
+        </footer>
+      </main>
+    </div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
