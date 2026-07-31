@@ -257,6 +257,7 @@ function renderResources() {
   document.querySelectorAll('[data-kind="channel"]').forEach((select) => fill(select, state.resources.channels || [], state.settings?.[select.id], 'Nenhum canal'));
   document.querySelectorAll('[data-feature-kind="channel"]').forEach((select) => fill(select, state.resources.channels || [], state.features?.automations?.[select.dataset.featureValue || select.id.replace('feature_', '')], 'Nenhum canal'));
   document.querySelectorAll('[data-feature-kind="channels"]').forEach((select) => fill(select, state.resources.channels || [], state.features?.automations?.[select.dataset.featureValue || select.id.replace('feature_', '')], ''));
+  renderSupportRolePicker();
   const roleCount = state.resources.roles?.length || 0;
   const channelCount = state.resources.channels?.length || 0;
   const syncedAt = state.resources.updated_at ? new Date(state.resources.updated_at).toLocaleString('pt-BR') : 'ainda nao sincronizado';
@@ -264,6 +265,44 @@ function renderResources() {
     node.textContent = `${roleCount} cargos e ${channelCount} canais - atualizado ${syncedAt}`;
   });
   renderOverview();
+}
+
+function renderSupportRolePicker() {
+  const select = $('support_role_ids');
+  const list = $('supportRolePicker');
+  if (!select || !list) return;
+  const selected = new Set([...select.selectedOptions].map((option) => option.value));
+  const filter = String($('supportRoleSearch')?.value || '').trim().toLocaleLowerCase('pt-BR');
+  const roles = (state.resources.roles || []).filter((role) => !filter || String(role.name || '').toLocaleLowerCase('pt-BR').includes(filter));
+  list.innerHTML = '';
+  if (!roles.length) {
+    const empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.textContent = state.resources.roles?.length ? 'Nenhum cargo corresponde a busca.' : 'Nenhum cargo encontrado. Clique em Sincronizar cargos e canais.';
+    list.appendChild(empty);
+  }
+  roles.forEach((role) => {
+    const label = document.createElement('label');
+    label.className = 'support-role-choice';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = selected.has(role.id);
+    checkbox.onchange = () => {
+      const option = [...select.options].find((item) => item.value === role.id);
+      if (option) option.selected = checkbox.checked;
+      renderSupportRolePicker();
+    };
+    const dot = document.createElement('i');
+    const numericColor = Number(role.color);
+    dot.style.background = /^#[0-9a-f]{6}$/i.test(String(role.color || ''))
+      ? role.color
+      : numericColor > 0 ? `#${numericColor.toString(16).padStart(6, '0')}` : '#7180a8';
+    const name = document.createElement('span');
+    name.textContent = role.name;
+    label.append(checkbox, dot, name);
+    list.appendChild(label);
+  });
+  if ($('supportRoleCount')) $('supportRoleCount').textContent = `${selected.size} selecionado${selected.size === 1 ? '' : 's'}`;
 }
 
 function sampleVars() {
@@ -644,6 +683,13 @@ async function testWelcome() {
   }
 }
 
+async function saveTicketSupport() {
+  const count = read('support_role_ids').length;
+  if (!count) return msg('Marque pelo menos um cargo de suporte antes de salvar.', true);
+  await saveSettings(true);
+  msg(`${count} cargo${count === 1 ? '' : 's'} de suporte salvo${count === 1 ? '' : 's'}. O runner atualizara os tickets abertos.`);
+}
+
 async function addProduct() {
   if (!state.instance) return msg('Salve o bot antes de cadastrar produtos.', true);
   const productType = $('productType').value;
@@ -806,6 +852,13 @@ function bind() {
     button.onclick = () => refreshResources().catch((error) => msg(error.message, true));
   });
   $('testWelcome').onclick = () => testWelcome().catch((error) => msg(error.message, true));
+  $('supportRoleSearch').oninput = renderSupportRolePicker;
+  $('clearSupportRoles').onclick = () => {
+    [...$('support_role_ids').options].forEach((option) => { option.selected = false; });
+    renderSupportRolePicker();
+    msg('Selecao limpa. Clique em Salvar cargos de suporte para confirmar.');
+  };
+  $('saveTicketSupport').onclick = () => saveTicketSupport().catch((error) => msg(error.message, true));
   $('saveSettings').onclick = () => saveSettings().catch((error) => msg(error.message, true));
   $('addProduct').onclick = () => addProduct().catch((error) => msg(error.message, true));
   $('productType').onchange = renderProductMode;

@@ -757,7 +757,7 @@ async function createCartThread(interaction, instance, settings) {
     type: ChannelType.PrivateThread,
     invitable: false
   });
-  await addTicketMembers(thread, interaction, settings);
+  await addTicketMembers(thread, interaction, instance, settings);
   await query(`
     insert into tickets (thread_id,bot_instance_id,guild_id,owner_id,status,purchase_status,closed_at)
     values ($1,$2,$3,$4,'cart','cart',null)
@@ -1096,16 +1096,30 @@ async function publishSalesPanel(instance, channel, context = {}) {
   }
 }
 
-async function addTicketMembers(thread, interaction, settings) {
+async function supportMembersForGuild(guild, supportRoleIds, instance, settings) {
+  if (!supportRoleIds.length) return [];
+  let members = guild.members.cache;
+  if (members.size < Number(guild.memberCount || 0)) {
+    members = await guild.members.fetch().catch(async (error) => {
+      await logEvent(instance, settings, 'ticket_support_sync_failed', `Nao consegui localizar membros dos cargos de suporte: ${error.message}`, {
+        category: 'tickets',
+        supportRoleIds
+      }).catch(console.error);
+      return null;
+    });
+  }
+  if (!members) return null;
+  return [...members.values()].filter((member) => !member.user?.bot && supportRoleIds.some((roleId) => member.roles.cache.has(roleId)));
+}
+
+async function addTicketMembers(thread, interaction, instance, settings) {
   await thread.members.add(interaction.user.id).catch(() => null);
   if (interaction.guild.ownerId) await thread.members.add(interaction.guild.ownerId).catch(() => null);
   const support = Array.isArray(settings.support_role_ids) ? settings.support_role_ids : [];
   if (!support.length) return;
-  const members = await interaction.guild.members.fetch().catch(() => null);
+  const members = await supportMembersForGuild(interaction.guild, support, instance, settings);
   if (!members) return;
-  await Promise.all(members
-    .filter((member) => support.some((roleId) => member.roles.cache.has(roleId)))
-    .map((member) => thread.members.add(member.id).catch(() => null)));
+  await Promise.all(members.map((member) => thread.members.add(member.id).catch(() => null)));
 }
 
 async function chooseVariation(interaction, instance, productId) {
@@ -1142,7 +1156,7 @@ async function openTicket(interaction, instance, productId = null, variantIndex 
     type: ChannelType.PrivateThread,
     invitable: false
   });
-  await addTicketMembers(thread, interaction, settings);
+  await addTicketMembers(thread, interaction, instance, settings);
   let order = null;
   if (item) {
     order = await one(`
@@ -1235,6 +1249,47 @@ async function refreshOpenTicketControls(instance, client) {
       const message = await thread.send({ content: 'Controles do atendimento', components }).catch(() => null);
       if (message) await query('update tickets set controls_message_id=$1 where thread_id=$2 and bot_instance_id=$3', [message.id, thread.id, instance.id]);
     }
+  }
+}
+
+async function syncOpenTicketSupportMembers(instance, client) {
+  const settings = await getSettings(instance.id);
+  const guild = client.guilds.cache.get(instance.guild_id);
+  if (!guild) return;
+  const supportRoleIds = Array.isArray(settings.support_role_ids) ? settings.support_role_ids.filter(Boolean) : [];
+  const staffMembers = await supportMembersForGuild(guild, supportRoleIds, instance, settings);
+  if (staffMembers === null) return;
+  const tickets = await query(`
+    select thread_id,owner_id from tickets
+    where bot_instance_id=$1 and status<>'closed'
+    order by created_at desc
+    limit 100
+  `, [instance.id]);
+  let updated = 0;
+  for (const ticket of tickets) {
+    const thread = await client.channels.fetch(ticket.thread_id).catch(() => null);
+    if (!thread?.isThread?.() || thread.archived) continue;
+    const desired = new Set([
+      client.user.id,
+      ticket.owner_id,
+      guild.ownerId,
+      ...staffMembers.map((member) => member.id)
+    ].filter(Boolean));
+    const current = await thread.members.fetch().catch(() => null);
+    if (!current) continue;
+    await Promise.all([...desired].map((memberId) => thread.members.add(memberId).catch(() => null)));
+    await Promise.all([...current.values()]
+      .filter((member) => !desired.has(member.id))
+      .map((member) => thread.members.remove(member.id).catch(() => null)));
+    updated += 1;
+  }
+  if (updated) {
+    await logEvent(instance, settings, 'ticket_support_synced', `Cargos de suporte sincronizados em ${updated} ticket(s) aberto(s).`, {
+      supportRoleIds,
+      staffCount: staffMembers.length,
+      ticketCount: updated,
+      category: 'tickets'
+    });
   }
 }
 
@@ -1480,6 +1535,7 @@ async function start(instance) {
       if (withMembersIntent) {
         await auditAutoRoles(instance, client, 'bot online / sincronizacao').catch(console.error);
         await auditRecentWelcomes(instance, client).catch(console.error);
+        await syncOpenTicketSupportMembers(instance, client).catch(console.error);
       }
     });
 
@@ -1564,6 +1620,7 @@ async function start(instance) {
     }, autoRoleAuditInterval);
     const welcomeTimer = setInterval(() => auditRecentWelcomes(instance, client).catch(console.error), 60000);
     const resourceTimer = setInterval(() => sync(instance, client, true, false).catch(console.error), 60000);
+    const supportTimer = setInterval(() => syncOpenTicketSupportMembers(instance, client).catch(console.error), 60000);
     const featureTimer = setInterval(async () => {
       const features = await getFeatures(instance.id);
       const settings = await getSettings(instance.id);
@@ -1571,7 +1628,7 @@ async function start(instance) {
     }, 30000);
     const autoMessageTimer = setInterval(() => runAutoMessage(instance, client).catch(console.error), 60000);
     const backupTimer = setInterval(() => runCloudBackup(instance).catch(console.error), 60 * 60 * 1000);
-    running.set(instance.id, { client, withMembersIntent: true, nextFullRetryAt: null, auditTimer, welcomeTimer, resourceTimer, featureTimer, autoMessageTimer, backupTimer });
+    running.set(instance.id, { client, withMembersIntent: true, nextFullRetryAt: null, auditTimer, welcomeTimer, resourceTimer, supportTimer, featureTimer, autoMessageTimer, backupTimer });
   } catch (error) {
     if (/disallowed intents/i.test(error.message || '')) {
       client.destroy();
@@ -1605,6 +1662,7 @@ async function stop(id) {
   if (entry.auditTimer) clearInterval(entry.auditTimer);
   if (entry.welcomeTimer) clearInterval(entry.welcomeTimer);
   if (entry.resourceTimer) clearInterval(entry.resourceTimer);
+  if (entry.supportTimer) clearInterval(entry.supportTimer);
   if (entry.featureTimer) clearInterval(entry.featureTimer);
   if (entry.autoMessageTimer) clearInterval(entry.autoMessageTimer);
   if (entry.backupTimer) clearInterval(entry.backupTimer);

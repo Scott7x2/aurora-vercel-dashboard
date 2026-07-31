@@ -221,10 +221,23 @@
               <p class="muted">Essa e a mensagem que aparece no canal com o botao para abrir ticket.</p>
               <div class="grid">
                 <label><span>Canal base</span><select id="ticket_channel_id" data-kind="channel"></select></label>
-                <label><span>Cargos suporte</span><select id="support_role_ids" data-kind="role" multiple size="5"></select></label>
                 <label><span>Tipo mensagem ticket</span><select id="ticket_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
                 <label><span>Titulo</span><input id="ticket_title"></label>
                 <label><span>Texto botao</span><input id="ticket_button_label"></label>
+              </div>
+              <div class="support-picker">
+                <div class="support-picker-head">
+                  <div><strong>Cargos que formam a staff</strong><small>Marque normalmente; nao precisa segurar Ctrl.</small></div>
+                  <span id="supportRoleCount">0 selecionados</span>
+                </div>
+                <input id="supportRoleSearch" type="search" placeholder="Buscar cargo pelo nome..." autocomplete="off">
+                <select id="support_role_ids" data-kind="role" multiple hidden></select>
+                <div id="supportRolePicker" class="support-role-list"></div>
+                <div class="actions">
+                  <button id="saveTicketSupport" type="button" class="primary">Salvar cargos de suporte</button>
+                  <button id="clearSupportRoles" type="button">Limpar selecao</button>
+                </div>
+                <small>O dono do servidor sempre pode fechar tickets. Somente os cargos marcados serao adicionados aos topicos privados, poderao fechar e aprovar compras e receberao o botao Notificar staff. O Server Members Intent precisa estar ativo para localizar os membros desses cargos.</small>
               </div>
               <label><span>Mensagem tickets</span><textarea id="ticket_message" rows="5"></textarea></label>
               <div class="actions"><button type="button" data-publish-type="ticket">Postar painel de ticket</button></div>

@@ -128,6 +128,18 @@ h2 { font-size: 18px; }
 .intent-checklist { display: flex; gap: 8px; flex-wrap: wrap; }
 .intent-checklist span { padding: 6px 9px; border-radius: 999px; background: rgba(88,227,155,.1); color: #b9ffd8; font-size: 11px; font-weight: 700; }
 .saved-help a { color: #9fb0ff; font-weight: 700; }
+.support-picker { display: grid; gap: 11px; padding: 14px; border: 1px solid rgba(109,135,255,.32); border-radius: 10px; background: rgba(16,24,48,.58); }
+.support-picker-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.support-picker-head strong, .support-picker-head small { display: block; }
+.support-picker-head small { margin-top: 4px; }
+.support-picker-head > span { padding: 5px 8px; border-radius: 999px; background: rgba(69,104,255,.16); color: #cbd5ff; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.support-role-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; max-height: 260px; overflow: auto; padding: 2px; }
+.support-role-choice { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: #080d1b; cursor: pointer; }
+.support-role-choice:has(input:checked) { border-color: #6d87ff; background: rgba(69,104,255,.14); }
+.support-role-choice input { width: auto; flex: 0 0 auto; }
+.support-role-choice i { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%; }
+.support-role-choice span { overflow: hidden; color: #dbe4ff; text-overflow: ellipsis; white-space: nowrap; }
+.support-picker > small { line-height: 1.5; }
 .message-preview { display: grid; gap: 8px; min-height: 130px; padding: 12px; border: 1px dashed var(--line); border-radius: 8px; background: rgba(8,13,27,.55); }
 .message-preview small { color: var(--muted); }
 .preview-simple { white-space: pre-wrap; padding: 12px; border-radius: 8px; background: #111827; color: #eef2ff; line-height: 1.45; }
@@ -195,4 +207,6 @@ footer { position: sticky; bottom: 0; padding: 14px; border: 1px solid var(--lin
   .intent-guide-head { align-items: stretch; flex-direction: column; }
   .intent-guide-head a { width: 100%; }
   .intent-steps { grid-template-columns: 1fr; }
+  .support-picker-head { align-items: flex-start; flex-direction: column; }
+  .support-role-list { grid-template-columns: 1fr; }
 }
