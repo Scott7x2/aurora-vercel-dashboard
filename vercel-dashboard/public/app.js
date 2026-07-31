@@ -1,12 +1,16 @@
-const state = { me: null, guilds: [], instances: [], guild: null, instance: null, resources: { channels: [], roles: [] }, settings: null, payment: null, products: [] };
+const state = { me: null, guilds: [], instances: [], guild: null, instance: null, resources: { channels: [], roles: [] }, settings: null, payment: null, products: [], logs: [] };
 const ids = [
   'brand_name', 'brand_color', 'auto_role_id', 'verified_role_id', 'remove_auto_role_after_verify',
   'welcome_channel_id', 'welcome_mode', 'welcome_color', 'welcome_title', 'welcome_message',
   'auth_channel_id', 'auth_mode', 'auth_color', 'auth_title',
   'auth_message', 'auth_button_label', 'ticket_channel_id', 'support_role_ids', 'ticket_mode', 'ticket_color', 'ticket_title',
   'ticket_message', 'ticket_button_label', 'sales_channel_id', 'sales_mode', 'sales_color', 'sales_title', 'sales_message',
+  'delivery_mode', 'delivery_color', 'delivery_title', 'delivery_message',
+  'review_channel_id', 'review_color', 'review_title', 'review_message', 'review_gif_url',
+  'log_channel_id', 'stock_warn_threshold',
   'button_emoji'
 ];
+const messageModeIds = new Set(['welcome_mode', 'auth_mode', 'ticket_mode', 'sales_mode']);
 const $ = (id) => document.getElementById(id);
 
 async function api(path, options = {}) {
@@ -45,7 +49,8 @@ function write(id, value) {
   if (!node) return;
   if (node.type === 'checkbox') node.checked = Boolean(value);
   else if (node.type === 'color') node.value = /^#[0-9a-f]{6}$/i.test(value || '') ? value : '#5865f2';
-  else if (id.endsWith('_mode')) node.value = value === 'simple' ? 'simple' : 'embed';
+  else if (node.type === 'number') node.value = value ?? '';
+  else if (messageModeIds.has(id)) node.value = value === 'simple' ? 'simple' : 'embed';
   else if (node.multiple) {
     const selected = new Set(value || []);
     [...node.options].forEach((item) => { item.selected = selected.has(item.value); });
@@ -54,6 +59,7 @@ function write(id, value) {
 
 function read(id) {
   const node = $(id);
+  if (!node) return '';
   if (node.type === 'checkbox') return node.checked;
   if (node.multiple) return [...node.selectedOptions].map((item) => item.value).filter(Boolean);
   return node.value;
@@ -200,6 +206,11 @@ function sampleVars() {
     product: 'Produto Exemplo',
     price: 'R$ 19,90',
     productDescription: 'Descricao curta do produto.',
+    variation: '7 dias',
+    variationPrice: 'R$ 20,00',
+    variationDescription: 'Acesso semanal',
+    deliveryContent: 'login: exemplo@email.com\nsenha: 123456',
+    stars: '5',
     ticket: '#ticket-scott',
     ticketId: '0001',
     emoji: read('button_emoji') || '✨',
@@ -246,7 +257,7 @@ function renderMessagePreview(prefix) {
 }
 
 function renderPreviews() {
-  ['welcome', 'auth', 'ticket', 'sales'].forEach(renderMessagePreview);
+  ['welcome', 'auth', 'ticket', 'sales', 'delivery', 'review'].forEach(renderMessagePreview);
 }
 
 function renderSettings() {
@@ -273,11 +284,36 @@ function renderProducts() {
     node.querySelector('small').textContent = product.product_type === 'variation'
       ? `${variations.length} variacao(oes) - a partir de ${product.price}`
       : product.price;
+    if (product.stock !== null && product.stock !== undefined) {
+      node.querySelector('small').textContent += ` | estoque: ${product.stock}`;
+    }
     node.querySelector('p').textContent = product.product_type === 'variation'
       ? variations.map((item) => `${item.name} | ${item.price}${item.description ? ` | ${item.description}` : ''}`).join('\n')
       : product.description || '';
     node.querySelector('button').onclick = () => deleteProduct(product.id);
     $('products').appendChild(node);
+  });
+}
+
+function renderLogs() {
+  const list = $('logsList');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!state.logs.length) {
+    const empty = document.createElement('div');
+    empty.className = 'log-item';
+    empty.innerHTML = '<strong>Nenhum log ainda</strong><small>Os eventos do bot vao aparecer aqui.</small>';
+    list.appendChild(empty);
+    return;
+  }
+  state.logs.forEach((log) => {
+    const node = document.createElement('div');
+    node.className = 'log-item';
+    node.innerHTML = '<strong></strong><small></small><p></p>';
+    node.querySelector('strong').textContent = log.event_type;
+    node.querySelector('small').textContent = new Date(log.created_at).toLocaleString('pt-BR');
+    node.querySelector('p').textContent = log.message || JSON.stringify(log.metadata || {});
+    list.appendChild(node);
   });
 }
 
@@ -399,6 +435,17 @@ async function loadSettings() {
   renderSettings();
   renderPayment();
   renderProducts();
+  await loadLogs().catch(() => null);
+}
+
+async function loadLogs() {
+  if (!state.instance) {
+    state.logs = [];
+  } else {
+    const data = await api(`/api/instances/${state.instance.id}/logs`);
+    state.logs = data.logs || [];
+  }
+  renderLogs();
 }
 
 async function saveInstance() {
@@ -452,12 +499,14 @@ async function addProduct() {
       price: $('productPrice').value,
       product_type: productType,
       variations,
+      stock: $('productStock').value,
+      delivery_content: $('productDeliveryContent').value,
       image_url: $('productImage').value,
       description: $('productDescription').value
     })
   });
   state.products.unshift(product);
-  ['productName', 'productPrice', 'productImage', 'productDescription', 'productVariations'].forEach((id) => { $(id).value = ''; });
+  ['productName', 'productPrice', 'productStock', 'productImage', 'productDescription', 'productVariations', 'productDeliveryContent'].forEach((id) => { $(id).value = ''; });
   $('productType').value = 'single';
   renderProducts();
   msg('Produto cadastrado.');
@@ -526,6 +575,7 @@ function bind() {
   $('saveSettings').onclick = () => saveSettings().catch((error) => msg(error.message, true));
   $('addProduct').onclick = () => addProduct().catch((error) => msg(error.message, true));
   $('savePayment').onclick = () => savePayment().catch((error) => msg(error.message, true));
+  $('reloadLogs').onclick = () => loadLogs().catch((error) => msg(error.message, true));
   $('uploadEmoji').onclick = () => uploadEmoji().catch((error) => msg(error.message, true));
   ids.forEach((id) => {
     const node = $(id);

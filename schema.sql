@@ -65,6 +65,17 @@ create table if not exists bot_settings (
   sales_color text not null default '#5865f2',
   sales_title text not null default 'Vitrine',
   sales_message text not null default 'Escolha um produto para iniciar sua compra.',
+  delivery_mode text not null default 'manual',
+  delivery_title text not null default 'Compra aprovada',
+  delivery_message text not null default 'Ola {user}, sua compra de {product} foi aprovada. O suporte enviara sua entrega em breve.',
+  delivery_color text not null default '#58e39b',
+  review_channel_id text,
+  review_title text not null default 'Nova avaliacao',
+  review_message text not null default '{user} avaliou {product} com {stars} estrelas.',
+  review_color text not null default '#ffcc4d',
+  review_gif_url text,
+  log_channel_id text,
+  stock_warn_threshold integer not null default 3,
   button_emoji text,
   custom_emoji_id text,
   custom_emoji_name text,
@@ -79,6 +90,9 @@ create table if not exists products (
   price text not null,
   product_type text not null default 'single',
   variations jsonb not null default '[]'::jsonb,
+  stock integer,
+  delivery_content text,
+  low_stock_notified boolean not null default false,
   description text,
   image_url text,
   active boolean not null default true,
@@ -102,9 +116,26 @@ create table if not exists tickets (
   owner_id text not null,
   product_id bigint references products(id) on delete set null,
   product_variant jsonb,
+  purchase_status text not null default 'pending',
+  approved_at timestamptz,
+  rating integer,
+  reviewed_at timestamptz,
   status text not null default 'open',
   created_at timestamptz not null default now(),
   closed_at timestamptz
+);
+
+create table if not exists bot_logs (
+  id bigserial primary key,
+  bot_instance_id uuid not null references bot_instances(id) on delete cascade,
+  guild_id text,
+  event_type text not null,
+  actor_id text,
+  target_id text,
+  channel_id text,
+  message text,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
 );
 
 alter table dashboard_sessions enable row level security;
@@ -114,3 +145,4 @@ alter table bot_settings enable row level security;
 alter table products enable row level security;
 alter table payment_settings enable row level security;
 alter table tickets enable row level security;
+alter table bot_logs enable row level security;

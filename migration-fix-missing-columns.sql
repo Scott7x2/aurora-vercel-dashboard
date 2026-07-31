@@ -44,6 +44,17 @@ alter table bot_settings add column if not exists sales_mode text not null defau
 alter table bot_settings add column if not exists sales_color text not null default '#5865f2';
 alter table bot_settings add column if not exists sales_title text not null default 'Vitrine';
 alter table bot_settings add column if not exists sales_message text not null default 'Escolha um produto para iniciar sua compra.';
+alter table bot_settings add column if not exists delivery_mode text not null default 'manual';
+alter table bot_settings add column if not exists delivery_title text not null default 'Compra aprovada';
+alter table bot_settings add column if not exists delivery_message text not null default 'Ola {user}, sua compra de {product} foi aprovada. O suporte enviara sua entrega em breve.';
+alter table bot_settings add column if not exists delivery_color text not null default '#58e39b';
+alter table bot_settings add column if not exists review_channel_id text;
+alter table bot_settings add column if not exists review_title text not null default 'Nova avaliacao';
+alter table bot_settings add column if not exists review_message text not null default '{user} avaliou {product} com {stars} estrelas.';
+alter table bot_settings add column if not exists review_color text not null default '#ffcc4d';
+alter table bot_settings add column if not exists review_gif_url text;
+alter table bot_settings add column if not exists log_channel_id text;
+alter table bot_settings add column if not exists stock_warn_threshold integer not null default 3;
 alter table bot_settings add column if not exists button_emoji text;
 alter table bot_settings add column if not exists custom_emoji_id text;
 alter table bot_settings add column if not exists custom_emoji_name text;
@@ -53,6 +64,9 @@ alter table bot_settings add column if not exists updated_at timestamptz not nul
 alter table products add column if not exists price text not null default '';
 alter table products add column if not exists product_type text not null default 'single';
 alter table products add column if not exists variations jsonb not null default '[]'::jsonb;
+alter table products add column if not exists stock integer;
+alter table products add column if not exists delivery_content text;
+alter table products add column if not exists low_stock_notified boolean not null default false;
 alter table products add column if not exists description text;
 alter table products add column if not exists image_url text;
 alter table products add column if not exists active boolean not null default true;
@@ -71,7 +85,25 @@ alter table payment_settings enable row level security;
 
 alter table tickets add column if not exists status text not null default 'open';
 alter table tickets add column if not exists product_variant jsonb;
+alter table tickets add column if not exists purchase_status text not null default 'pending';
+alter table tickets add column if not exists approved_at timestamptz;
+alter table tickets add column if not exists rating integer;
+alter table tickets add column if not exists reviewed_at timestamptz;
 alter table tickets add column if not exists created_at timestamptz not null default now();
 alter table tickets add column if not exists closed_at timestamptz;
+
+create table if not exists bot_logs (
+  id bigserial primary key,
+  bot_instance_id uuid not null references bot_instances(id) on delete cascade,
+  guild_id text,
+  event_type text not null,
+  actor_id text,
+  target_id text,
+  channel_id text,
+  message text,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+alter table bot_logs enable row level security;
 
 select 'Aurora Zero colunas corrigidas com sucesso' as status;

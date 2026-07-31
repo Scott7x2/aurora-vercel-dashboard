@@ -142,6 +142,8 @@ function renderTemplate(template, context = {}) {
     variation: context.variant?.name || '',
     variationPrice: context.variant?.price || '',
     variationDescription: context.variant?.description || '',
+    deliveryContent: context.deliveryContent || context.product?.delivery_content || '',
+    stars: context.stars || '',
     ticket: context.thread ? `<#${context.thread.id}>` : '',
     ticketId: context.thread?.id || '',
     emoji: settings.button_emoji || '',
@@ -193,6 +195,29 @@ async function product(instanceId, id) {
 
 async function paymentSettings(instanceId) {
   return one('select * from payment_settings where bot_instance_id=$1', [instanceId]);
+}
+
+async function logEvent(instance, settings, type, message, metadata = {}) {
+  await query(`
+    insert into bot_logs (bot_instance_id,guild_id,event_type,actor_id,target_id,channel_id,message,metadata)
+    values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+  `, [
+    instance.id,
+    instance.guild_id,
+    type,
+    metadata.actorId || null,
+    metadata.targetId || null,
+    metadata.channelId || null,
+    String(message || '').slice(0, 800),
+    JSON.stringify(metadata)
+  ]).catch(console.error);
+  if (!settings?.log_channel_id) return;
+  const client = running.get(instance.id)?.client;
+  const channel = client ? await client.channels.fetch(settings.log_channel_id).catch(() => null) : null;
+  if (!channel?.isTextBased?.()) return;
+  await channel.send({
+    embeds: [embed(settings, `Log: ${type}`, message || 'Evento registrado.', settings.brand_color)]
+  }).catch(() => null);
 }
 
 function variationsOf(item) {
@@ -360,9 +385,116 @@ async function openTicket(interaction, instance, productId = null, variantIndex 
         : renderTemplate('Ola {user}, descreva o atendimento. {supportRoleMentions}', ticketContext),
       settings.ticket_color
     )],
-    components: [row(btn('az:close', 'Fechar ticket', ButtonStyle.Danger, settings.button_emoji))]
+    components: item
+      ? [row(btn('az:approve', 'Aprovar compra', ButtonStyle.Success, '✅'), btn('az:close', 'Fechar ticket', ButtonStyle.Danger, settings.button_emoji))]
+      : [row(btn('az:close', 'Fechar ticket', ButtonStyle.Danger, settings.button_emoji))]
+  });
+  await logEvent(instance, settings, item ? 'cart_created' : 'ticket_opened', item ? `Carrinho criado: ${item.name} por ${interaction.user.tag}` : `Ticket aberto por ${interaction.user.tag}`, {
+    actorId: interaction.user.id,
+    targetId: item?.id ? String(item.id) : null,
+    channelId: thread.id,
+    product: item?.name,
+    variant
   });
   return interaction.reply({ content: `Ticket criado: ${thread}`, ephemeral: true });
+}
+
+function isSupportOrManager(interaction, settings, ticket) {
+  const support = Array.isArray(settings.support_role_ids) ? settings.support_role_ids : [];
+  return ticket?.owner_id === interaction.user.id
+    || interaction.memberPermissions?.has(PermissionFlagsBits.ManageThreads)
+    || support.some((roleId) => interaction.member?.roles?.cache?.has(roleId));
+}
+
+async function approvePurchase(interaction, instance) {
+  if (!interaction.channel?.isThread?.()) return interaction.reply({ content: 'Use dentro de um ticket de compra.', ephemeral: true });
+  const settings = await getSettings(instance.id);
+  const ticket = await one('select * from tickets where thread_id=$1 and bot_instance_id=$2', [interaction.channel.id, instance.id]);
+  if (!ticket?.product_id) return interaction.reply({ content: 'Esse ticket nao possui produto vinculado.', ephemeral: true });
+  if (!isSupportOrManager(interaction, settings, ticket)) return interaction.reply({ content: 'Apenas suporte ou gerencia pode aprovar.', ephemeral: true });
+  if (ticket.purchase_status === 'approved') return interaction.reply({ content: 'Essa compra ja foi aprovada.', ephemeral: true });
+
+  const item = await product(instance.id, ticket.product_id);
+  const variant = ticket.product_variant || null;
+  if (!item) return interaction.reply({ content: 'Produto nao encontrado.', ephemeral: true });
+
+  let updatedProduct = item;
+  if (item.stock !== null && item.stock !== undefined) {
+    if (Number(item.stock) <= 0) return interaction.reply({ content: 'Estoque esgotado para esse produto.', ephemeral: true });
+    updatedProduct = await one('update products set stock = greatest(stock - 1, 0) where id=$1 and bot_instance_id=$2 returning *', [item.id, instance.id]) || item;
+  }
+
+  await query("update tickets set purchase_status='approved', approved_at=now() where thread_id=$1", [ticket.thread_id]);
+  const buyer = await interaction.client.users.fetch(ticket.owner_id).catch(() => null);
+  const deliveryContent = settings.delivery_mode === 'auto' ? (item.delivery_content || 'Entrega automatica configurada, mas esse produto nao possui conteudo salvo.') : '';
+  const context = { interaction, settings, product: item, variant, deliveryContent };
+  const deliveryBody = settings.delivery_mode === 'auto'
+    ? `${settings.delivery_message || ''}\n\n${deliveryContent ? `**Seus produtos:**\n${deliveryContent}` : ''}`
+    : settings.delivery_message || 'Sua compra foi aprovada. O suporte enviara sua entrega em breve.';
+
+  if (buyer) {
+    await buyer.send({
+      embeds: [embed(settings, renderTemplate(settings.delivery_title, context), renderTemplate(deliveryBody, context), settings.delivery_color)],
+      components: [row(
+        btn(`az:review:${ticket.thread_id}:1`, '⭐ 1', ButtonStyle.Secondary),
+        btn(`az:review:${ticket.thread_id}:2`, '⭐ 2', ButtonStyle.Secondary),
+        btn(`az:review:${ticket.thread_id}:3`, '⭐ 3', ButtonStyle.Secondary),
+        btn(`az:review:${ticket.thread_id}:4`, '⭐ 4', ButtonStyle.Secondary),
+        btn(`az:review:${ticket.thread_id}:5`, '⭐ 5', ButtonStyle.Success)
+      )]
+    }).catch(() => null);
+  }
+
+  await logEvent(instance, settings, 'purchase_approved', `Compra aprovada: ${item.name} para <@${ticket.owner_id}>`, {
+    actorId: interaction.user.id,
+    targetId: ticket.owner_id,
+    channelId: interaction.channel.id,
+    product: item.name,
+    variant,
+    stock: updatedProduct.stock
+  });
+
+  const threshold = Number(settings.stock_warn_threshold ?? 3);
+  if (updatedProduct.stock !== null && updatedProduct.stock !== undefined && Number(updatedProduct.stock) <= threshold) {
+    await logEvent(instance, settings, Number(updatedProduct.stock) <= 0 ? 'stock_empty' : 'stock_low', `Estoque de ${item.name}: ${updatedProduct.stock}`, {
+      targetId: String(item.id),
+      product: item.name,
+      stock: updatedProduct.stock
+    });
+  }
+
+  await interaction.reply({ content: 'Compra aprovada. Entrega enviada no privado e avaliacao liberada.', ephemeral: true });
+  await interaction.channel.send(`✅ Compra aprovada por ${interaction.user}. Entrega enviada para <@${ticket.owner_id}>.`).catch(() => null);
+}
+
+async function submitReview(interaction, instance, threadId, rating) {
+  const stars = Math.max(1, Math.min(5, Number(rating) || 5));
+  const settings = await getSettings(instance.id);
+  const ticket = await one('select * from tickets where thread_id=$1 and bot_instance_id=$2', [threadId, instance.id]);
+  if (!ticket || ticket.owner_id !== interaction.user.id) return interaction.reply({ content: 'Avaliacao nao encontrada para voce.', ephemeral: true });
+  if (ticket.reviewed_at) return interaction.reply({ content: 'Voce ja avaliou essa compra. Obrigado!', ephemeral: true });
+  const item = ticket.product_id ? await product(instance.id, ticket.product_id) : null;
+  await query('update tickets set rating=$1, reviewed_at=now() where thread_id=$2', [stars, threadId]);
+
+  const channel = settings.review_channel_id ? await interaction.client.channels.fetch(settings.review_channel_id).catch(() => null) : null;
+  const context = { interaction, settings, product: item, variant: ticket.product_variant, stars: String(stars) };
+  if (channel?.isTextBased?.()) {
+    const reviewEmbed = embed(settings, renderTemplate(settings.review_title, context), renderTemplate(settings.review_message, context), settings.review_color)
+      .addFields(
+        { name: 'Produto comprado', value: item?.name || 'Produto', inline: true },
+        { name: 'Avaliacao', value: '⭐'.repeat(stars), inline: true },
+        { name: 'Comprador', value: `${interaction.user}`, inline: true }
+      );
+    if (settings.review_gif_url) reviewEmbed.setImage(settings.review_gif_url);
+    await channel.send({ embeds: [reviewEmbed] }).catch(() => null);
+  }
+  await logEvent(instance, settings, 'review_created', `${interaction.user.tag} avaliou ${item?.name || 'produto'} com ${stars} estrelas`, {
+    actorId: interaction.user.id,
+    targetId: item?.id ? String(item.id) : null,
+    rating: stars,
+    product: item?.name
+  });
+  return interaction.reply({ content: `Obrigado pela avaliacao de ${stars} estrela(s)!`, ephemeral: true });
 }
 
 async function closeTicket(interaction, instance) {
@@ -373,11 +505,19 @@ async function closeTicket(interaction, instance) {
   const allowed = ticket?.owner_id === interaction.user.id || interaction.memberPermissions?.has(PermissionFlagsBits.ManageThreads) || support.some((roleId) => interaction.member?.roles?.cache?.has(roleId));
   if (!allowed) return interaction.reply({ content: 'Apenas o autor ou suporte pode fechar.', ephemeral: true });
   await query("update tickets set status='closed', closed_at=now() where thread_id=$1", [interaction.channel.id]);
+  await logEvent(instance, settings, 'ticket_closed', `Ticket fechado por ${interaction.user.tag}`, {
+    actorId: interaction.user.id,
+    channelId: interaction.channel.id
+  });
   await interaction.reply('Ticket fechado.');
   setTimeout(() => interaction.channel.setArchived(true).catch(() => null), 2500);
 }
 
 async function handle(interaction, instance) {
+  if (interaction.isButton() && interaction.customId.startsWith('az:review:')) {
+    const [, action, threadId, rating] = interaction.customId.split(':');
+    if (action === 'review') return submitReview(interaction, instance, threadId, Number(rating));
+  }
   if (instance.guild_id !== interaction.guildId) return;
   if (interaction.isChatInputCommand() && interaction.commandName === 'painel') {
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: 'Voce precisa de Gerenciar Servidor.', ephemeral: true });
@@ -395,11 +535,16 @@ async function handle(interaction, instance) {
     if (!settings.verified_role_id) return interaction.reply({ content: 'Cargo verificado nao configurado.', ephemeral: true });
     await interaction.member.roles.add(settings.verified_role_id).catch(() => null);
     if (settings.remove_auto_role_after_verify && settings.auto_role_id) await interaction.member.roles.remove(settings.auto_role_id).catch(() => null);
+    await logEvent(instance, settings, 'auth_verified', `${interaction.user.tag} verificou acesso`, {
+      actorId: interaction.user.id,
+      channelId: interaction.channelId
+    });
     return interaction.reply({ content: 'Acesso liberado.', ephemeral: true });
   }
   if (action === 'ticket') return openTicket(interaction, instance);
   if (action === 'buy') return chooseVariation(interaction, instance, Number(value));
   if (action === 'variant') return openTicket(interaction, instance, Number(value), Number(extra));
+  if (action === 'approve') return approvePurchase(interaction, instance);
   if (action === 'close') return closeTicket(interaction, instance);
 }
 
@@ -408,8 +553,8 @@ async function start(instance) {
 
   const buildClient = (withMembersIntent = true) => {
     const intents = withMembersIntent
-      ? [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
-      : [GatewayIntentBits.Guilds];
+      ? [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages]
+      : [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages];
     const client = new Client({ intents });
 
     client.once(Events.ClientReady, async () => {
@@ -429,6 +574,9 @@ async function start(instance) {
       client.on(Events.GuildMemberAdd, async (member) => {
         if (member.guild.id !== instance.guild_id) return;
         const settings = await getSettings(instance.id);
+        await logEvent(instance, settings, 'member_join', `${member.user.tag} entrou no servidor`, {
+          actorId: member.user.id
+        });
         if (settings.auto_role_id) {
           await member.roles.add(settings.auto_role_id).catch((error) => {
             const message = `Falha ao aplicar cargo automatico: ${error.message}. Verifique se o bot tem Gerenciar Cargos e se o cargo do bot esta acima do cargo automatico.`;
@@ -451,7 +599,25 @@ async function start(instance) {
           setWarning(instance.id, message).catch(console.error);
         });
       });
+
+      client.on(Events.GuildMemberRemove, async (member) => {
+        if (member.guild.id !== instance.guild_id) return;
+        const settings = await getSettings(instance.id);
+        await logEvent(instance, settings, 'member_leave', `${member.user?.tag || member.id} saiu do servidor`, {
+          actorId: member.id
+        });
+      });
     }
+
+    client.on(Events.MessageDelete, async (message) => {
+      if (message.guildId !== instance.guild_id) return;
+      const settings = await getSettings(instance.id);
+      await logEvent(instance, settings, 'message_deleted', `Mensagem apagada em <#${message.channelId}>${message.author ? ` por ${message.author.tag}` : ''}`, {
+        actorId: message.author?.id,
+        channelId: message.channelId,
+        content: String(message.content || '').slice(0, 500)
+      });
+    });
 
     client.on(Events.InteractionCreate, async (interaction) => {
       try {

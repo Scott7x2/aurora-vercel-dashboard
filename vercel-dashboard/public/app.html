@@ -25,6 +25,8 @@
           <button data-tab="auth">Autenticacao</button>
           <button data-tab="tickets">Tickets</button>
           <button data-tab="sales">Vendas</button>
+          <button data-tab="postpurchase">Pos-compra</button>
+          <button data-tab="logs">Logs</button>
           <button data-tab="identity">Identidade</button>
           <button data-tab="variables">Variaveis</button>
         </nav>
@@ -70,7 +72,7 @@
               <li>Em <strong>Bot</strong>, ative <strong>Server Members Intent</strong> para autorole e boas-vindas.</li>
               <li>Em <strong>OAuth2 > URL Generator</strong>, marque <strong>bot</strong> e <strong>applications.commands</strong>, escolha as permissoes e convide para o servidor.</li>
             </ol>
-            <p>Permissoes recomendadas: Manage Roles, Manage Channels, Manage Expressions, Create Private Threads, Send Messages, Use Slash Commands e Embed Links.</p>
+            <p>O botao <b>Adicionar bot ao servidor</b> ja abre o convite com as permissoes recomendadas: Gerenciar Cargos, Gerenciar Canais, Gerenciar Expressoes/Emojis, Gerenciar Threads, Criar Threads Privadas, Enviar Mensagens, Enviar em Threads, Usar Comandos, Ver Canais, Embeds, Anexos e Historico.</p>
           </div>
         </section>
 
@@ -161,12 +163,50 @@
             <label><span>Tipo do produto</span><select id="productType"><option value="single">Produto unico</option><option value="variation">Produto com variacoes</option></select></label>
             <input id="productName" placeholder="Produto">
             <input id="productPrice" placeholder="Preco">
+            <input id="productStock" type="number" min="0" placeholder="Estoque opcional">
             <input id="productImage" placeholder="Imagem opcional">
             <textarea id="productDescription" rows="3" placeholder="Descricao"></textarea>
             <textarea id="productVariations" rows="4" placeholder="Variacoes, uma por linha. Ex:&#10;1 dia | R$ 5,00 | Acesso por 24h&#10;7 dias | R$ 20,00 | Acesso semanal"></textarea>
+            <textarea id="productDeliveryContent" rows="4" placeholder="Conteudo da entrega automatica desse produto. Ex: login/senha, key, link privado ou instrucoes."></textarea>
             <button id="addProduct" class="primary">Adicionar produto</button>
           </div>
           <div id="products"></div>
+        </section>
+
+        <section id="tab-postpurchase" class="tab">
+          <div class="head"><div><h2>Pos-compra</h2><p>Entrega, aprovacoes, avaliacoes e estoque.</p></div></div>
+          <div class="saved-help">
+            <strong>Como funciona</strong>
+            <p>Quando um ticket de compra abrir, o suporte ve o botao <b>Aprovar compra</b>. Ao aprovar, o bot envia a entrega no privado, baixa estoque, registra log e manda botoes de avaliacao por estrelas.</p>
+          </div>
+          <div class="grid">
+            <label><span>Tipo de entrega</span><select id="delivery_mode"><option value="manual">Manual - avisar comprador</option><option value="auto">Automatica - enviar conteudo do produto</option></select></label>
+            <label><span>Cor da entrega</span><input id="delivery_color" type="color"></label>
+            <label><span>Titulo da entrega</span><input id="delivery_title"></label>
+            <label><span>Avisar estoque acabando em</span><input id="stock_warn_threshold" type="number" min="0" placeholder="3"></label>
+          </div>
+          <label><span>Mensagem enviada no privado apos aprovar</span><textarea id="delivery_message" rows="5" placeholder="Use {user}, {product}, {price}, {variation}, {deliveryContent}, {server}"></textarea></label>
+          <div id="delivery_preview" class="message-preview"></div>
+          <div class="grid">
+            <label><span>Canal de avaliacoes</span><select id="review_channel_id" data-kind="channel"></select></label>
+            <label><span>Cor avaliacao</span><input id="review_color" type="color"></label>
+            <label><span>Titulo avaliacao</span><input id="review_title"></label>
+            <label><span>Imagem/GIF da avaliacao</span><input id="review_gif_url" placeholder="https://...gif ou imagem"></label>
+          </div>
+          <label><span>Mensagem do embed de avaliacao</span><textarea id="review_message" rows="4" placeholder="{user} avaliou {product} com {stars} estrelas."></textarea></label>
+          <div id="review_preview" class="message-preview review-demo"></div>
+        </section>
+
+        <section id="tab-logs" class="tab">
+          <div class="head"><div><h2>Logs completos</h2><p>Eventos importantes do bot, compras, tickets, membros e mensagens apagadas.</p></div><button id="reloadLogs">Atualizar logs</button></div>
+          <div class="grid">
+            <label><span>Canal de logs no Discord</span><select id="log_channel_id" data-kind="channel"></select></label>
+          </div>
+          <div class="saved-help">
+            <strong>Eventos registrados</strong>
+            <p>Entradas, saidas, mensagens apagadas, carrinhos/tickets criados, tickets fechados, compras aprovadas, estoque baixo/acabando e avaliacoes.</p>
+          </div>
+          <div id="logsList" class="logs-list"></div>
         </section>
 
         <section id="tab-identity" class="tab">
@@ -191,7 +231,7 @@
           <div class="variables">
             <h3>Variaveis para mensagens</h3>
             <p>Use nos textos de boas-vindas, verificacao, tickets e vendas.</p>
-            <code>{user}</code><code>{userMention}</code><code>{username}</code><code>{server}</code><code>{memberCount}</code><code>{channel}</code><code>{channelMention}</code><code>{owner}</code><code>{autoRole}</code><code>{autoRoleMention}</code><code>{verifiedRole}</code><code>{verifiedRoleMention}</code><code>{supportRoles}</code><code>{supportRoleMentions}</code><code>{product}</code><code>{price}</code><code>{emoji}</code><code>{date}</code><code>{time}</code>
+            <code>{user}</code><code>{userMention}</code><code>{username}</code><code>{server}</code><code>{memberCount}</code><code>{channel}</code><code>{channelMention}</code><code>{owner}</code><code>{autoRole}</code><code>{autoRoleMention}</code><code>{verifiedRole}</code><code>{verifiedRoleMention}</code><code>{supportRoles}</code><code>{supportRoleMentions}</code><code>{product}</code><code>{price}</code><code>{variation}</code><code>{deliveryContent}</code><code>{stars}</code><code>{emoji}</code><code>{date}</code><code>{time}</code>
           </div>
         </section>
 
@@ -207,7 +247,7 @@
             <div class="variable-card"><h3>Servidor</h3><code>{server}</code><code>{guild}</code><code>{memberCount}</code><code>{owner}</code><small>{owner} marca o dono do servidor.</small></div>
             <div class="variable-card"><h3>Canais</h3><code>{channel}</code><code>{channelMention}</code><code>{channelName}</code><code>{welcomeChannel}</code><code>{authChannel}</code><code>{ticketChannel}</code><code>{salesChannel}</code><small>{channel} marca o canal usado no contexto.</small></div>
             <div class="variable-card"><h3>Cargos</h3><code>{autoRole}</code><code>{autoRoleMention}</code><code>{verifiedRole}</code><code>{verifiedRoleMention}</code><code>{supportRoles}</code><code>{supportRoleMentions}</code><small>Use os campos com Mention para marcar cargos.</small></div>
-            <div class="variable-card"><h3>Vendas e ticket</h3><code>{product}</code><code>{price}</code><code>{productDescription}</code><code>{ticket}</code><code>{ticketId}</code><small>Funcionam melhor em venda e abertura de ticket.</small></div>
+            <div class="variable-card"><h3>Vendas e ticket</h3><code>{product}</code><code>{price}</code><code>{variation}</code><code>{variationPrice}</code><code>{productDescription}</code><code>{deliveryContent}</code><code>{ticket}</code><code>{ticketId}</code><code>{stars}</code><small>Funcionam melhor em venda, entrega e avaliacao.</small></div>
             <div class="variable-card"><h3>Extras</h3><code>{emoji}</code><code>{date}</code><code>{time}</code><small>{emoji} usa o emoji salvo na aba Identidade.</small></div>
           </div>
           <label><span>Exemplo pronto</span><textarea rows="4" readonly>Ola {user}, seja bem-vindo ao {server}! Leia o canal {channel} e aguarde o suporte {supportRoleMentions}. {emoji}</textarea></label>

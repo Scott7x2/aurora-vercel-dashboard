@@ -15,7 +15,12 @@ const manageGuild = 0x20n;
 const apiDir = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(apiDir, '..', 'public');
 const env = (name) => String(process.env[name] || '').trim();
-const botPermissions = 344208523344n;
+// Permissoes pedidas no botao "Adicionar bot ao servidor".
+// Inclui: Ver Canais, Enviar Mensagens, Embeds, Anexos, Historico,
+// Gerenciar Cargos, Gerenciar Canais, Gerenciar Expressoes/Emojis,
+// Usar Comandos, Gerenciar Threads, Criar Threads Privadas,
+// Enviar em Threads e Gerenciar Mensagens.
+const botPermissions = 364267039760n;
 
 const key = Buffer.from(env('BOT_ENCRYPTION_KEY'), 'base64');
 const pool = env('DATABASE_URL')
@@ -166,6 +171,17 @@ function paymentProvider(value) {
 
 function checkoutMode(value) {
   return value === 'external' ? 'external' : 'ticket';
+}
+
+function deliveryMode(value) {
+  return value === 'auto' ? 'auto' : 'manual';
+}
+
+function integerOrNull(value, min = 0, max = 999999) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Math.trunc(Number(value));
+  if (!Number.isFinite(number)) return null;
+  return Math.min(Math.max(number, min), max);
 }
 
 function maskPrivateDetails(value) {
@@ -606,6 +622,17 @@ app.put('/api/instances/:id/settings', async (req, res, next) => {
       hexColor(body.sales_color, hexColor(body.brand_color)),
       text(body.sales_title || 'Vitrine', 100),
       text(body.sales_message || '', 1500),
+      deliveryMode(body.delivery_mode),
+      text(body.delivery_title || 'Compra aprovada', 100),
+      text(body.delivery_message || '', 2500),
+      hexColor(body.delivery_color, '#58e39b'),
+      snowflake(body.review_channel_id),
+      text(body.review_title || 'Nova avaliacao', 100),
+      text(body.review_message || '', 1500),
+      hexColor(body.review_color, '#ffcc4d'),
+      text(body.review_gif_url, 300),
+      snowflake(body.log_channel_id),
+      integerOrNull(body.stock_warn_threshold, 0, 999999) ?? 3,
       text(body.button_emoji || '', 120)
     ];
     const saved = await one(`
@@ -614,8 +641,11 @@ app.put('/api/instances/:id/settings', async (req, res, next) => {
         welcome_channel_id,welcome_mode,welcome_color,welcome_title,welcome_message,
         auth_channel_id,auth_mode,auth_color,auth_title,auth_message,auth_button_label,
         ticket_channel_id,support_role_ids,ticket_mode,ticket_color,ticket_title,ticket_message,ticket_button_label,
-        sales_channel_id,sales_mode,sales_color,sales_title,sales_message,button_emoji,updated_at
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,now())
+        sales_channel_id,sales_mode,sales_color,sales_title,sales_message,
+        delivery_mode,delivery_title,delivery_message,delivery_color,
+        review_channel_id,review_title,review_message,review_color,review_gif_url,
+        log_channel_id,stock_warn_threshold,button_emoji,updated_at
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,now())
       on conflict (bot_instance_id) do update set
         brand_name=excluded.brand_name, brand_color=excluded.brand_color, auto_role_id=excluded.auto_role_id,
         verified_role_id=excluded.verified_role_id, remove_auto_role_after_verify=excluded.remove_auto_role_after_verify,
@@ -628,7 +658,13 @@ app.put('/api/instances/:id/settings', async (req, res, next) => {
         ticket_title=excluded.ticket_title, ticket_message=excluded.ticket_message,
         ticket_button_label=excluded.ticket_button_label, sales_channel_id=excluded.sales_channel_id,
         sales_mode=excluded.sales_mode, sales_color=excluded.sales_color, sales_title=excluded.sales_title,
-        sales_message=excluded.sales_message, button_emoji=excluded.button_emoji, updated_at=now()
+        sales_message=excluded.sales_message, delivery_mode=excluded.delivery_mode,
+        delivery_title=excluded.delivery_title, delivery_message=excluded.delivery_message,
+        delivery_color=excluded.delivery_color, review_channel_id=excluded.review_channel_id,
+        review_title=excluded.review_title, review_message=excluded.review_message,
+        review_color=excluded.review_color, review_gif_url=excluded.review_gif_url,
+        log_channel_id=excluded.log_channel_id, stock_warn_threshold=excluded.stock_warn_threshold,
+        button_emoji=excluded.button_emoji, updated_at=now()
       returning *
     `, values);
     res.json(saved);
@@ -673,10 +709,40 @@ app.post('/api/instances/:id/products', async (req, res, next) => {
     if (!name || !price) return res.status(400).json({ error: 'name_and_price_required' });
     if (type === 'variation' && !variations.length) return res.status(400).json({ error: 'variations_required', message: 'Cadastre pelo menos uma variacao com nome e preco.' });
     const saved = await one(`
-      insert into products (bot_instance_id,name,price,product_type,variations,description,image_url,active)
-      values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8) returning *
-    `, [instance.id, name, price, type, json(variations), text(req.body.description, 1000), text(req.body.image_url, 300), req.body.active !== false]);
+      insert into products (bot_instance_id,name,price,product_type,variations,stock,delivery_content,description,image_url,active)
+      values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10) returning *
+    `, [
+      instance.id,
+      name,
+      price,
+      type,
+      json(variations),
+      integerOrNull(req.body.stock, 0, 999999),
+      text(req.body.delivery_content, 5000),
+      text(req.body.description, 1000),
+      text(req.body.image_url, 300),
+      req.body.active !== false
+    ]);
     res.json(saved);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/instances/:id/logs', async (req, res, next) => {
+  try {
+    const user = await requireSession(req, res);
+    if (!user) return;
+    const instance = await getInstance(req.params.id, user.discord_id);
+    if (!instance) return res.status(404).json({ error: 'not_found' });
+    const logs = await query(`
+      select id,event_type,actor_id,target_id,channel_id,message,metadata,created_at
+      from bot_logs
+      where bot_instance_id=$1
+      order by created_at desc
+      limit 150
+    `, [instance.id]);
+    res.json({ logs });
   } catch (error) {
     next(error);
   }
