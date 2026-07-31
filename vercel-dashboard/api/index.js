@@ -441,6 +441,16 @@ app.get('/api/instances/:id/resources', async (req, res, next) => {
     const instance = await getInstance(req.params.id, user.discord_id);
     if (!instance) return res.status(404).json({ error: 'not_found' });
     const data = await one('select * from guild_resources where bot_instance_id = $1', [instance.id]);
+    const roles = Array.isArray(data?.roles) ? data.roles : [];
+    const channels = Array.isArray(data?.channels) ? data.channels : [];
+    const staleOrEmpty = !data || !roles.length || !channels.length;
+    if (staleOrEmpty && instance.token_encrypted) {
+      try {
+        return res.json(await syncGuildResources(instance));
+      } catch {
+        return res.json(data || { channels: [], roles: [], updated_at: null });
+      }
+    }
     res.json(data || { channels: [], roles: [], updated_at: null });
   } catch (error) {
     next(error);
