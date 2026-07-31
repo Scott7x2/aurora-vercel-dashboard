@@ -165,8 +165,8 @@ function productVariations(value) {
 }
 
 function paymentProvider(value) {
-  const allowed = new Set(['manual', 'mercadopago', 'stripe', 'pagseguro', 'asaas', 'other']);
-  return allowed.has(value) ? value : 'manual';
+  const allowed = new Set(['aurora', 'manual', 'mercadopago', 'stripe', 'pagseguro', 'asaas', 'other']);
+  return allowed.has(value) ? value : 'aurora';
 }
 
 function checkoutMode(value) {
@@ -194,7 +194,7 @@ function maskPrivateDetails(value) {
 function publicPayment(row) {
   if (!row) {
     return {
-      provider: 'manual',
+      provider: 'aurora',
       checkout_mode: 'ticket',
       receiver_name: '',
       public_instructions: '',
@@ -211,7 +211,7 @@ function publicPayment(row) {
     }
   }
   return {
-    provider: row.provider || 'manual',
+    provider: row.provider || 'aurora',
     checkout_mode: row.checkout_mode || 'ticket',
     receiver_name: row.receiver_name || '',
     public_instructions: row.public_instructions || '',
@@ -706,8 +706,9 @@ app.post('/api/instances/:id/products', async (req, res, next) => {
     const type = productType(req.body.product_type);
     const variations = productVariations(req.body.variations);
     const price = type === 'variation' ? (variations[0]?.price || '') : text(req.body.price, 50);
-    if (!name || !price) return res.status(400).json({ error: 'name_and_price_required' });
-    if (type === 'variation' && !variations.length) return res.status(400).json({ error: 'variations_required', message: 'Cadastre pelo menos uma variacao com nome e preco.' });
+    if (!name) return res.status(400).json({ error: 'name_required', message: 'Digite o nome do produto.' });
+    if (type === 'single' && !price) return res.status(400).json({ error: 'price_required', message: 'Digite o preco do produto unico.' });
+    if (type === 'variation' && !variations.length) return res.status(400).json({ error: 'variations_required', message: 'Cadastre pelo menos uma variacao no formato: 1 dia | R$ 5,00 | descricao opcional.' });
     const saved = await one(`
       insert into products (bot_instance_id,name,price,product_type,variations,stock,delivery_content,description,image_url,active)
       values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10) returning *

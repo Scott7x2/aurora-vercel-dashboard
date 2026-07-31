@@ -101,12 +101,28 @@ create table if not exists products (
 
 create table if not exists payment_settings (
   bot_instance_id uuid primary key references bot_instances(id) on delete cascade,
-  provider text not null default 'manual',
+  provider text not null default 'aurora',
   checkout_mode text not null default 'ticket',
   receiver_name text,
   public_instructions text,
   private_details_encrypted text,
   updated_at timestamptz not null default now()
+);
+
+create table if not exists payment_orders (
+  id uuid primary key default gen_random_uuid(),
+  bot_instance_id uuid not null references bot_instances(id) on delete cascade,
+  ticket_thread_id text,
+  guild_id text not null,
+  buyer_id text not null,
+  product_id bigint references products(id) on delete set null,
+  product_name text not null default 'Produto',
+  product_variant jsonb,
+  amount_text text not null default '',
+  provider text not null default 'aurora',
+  status text not null default 'pending',
+  approved_at timestamptz,
+  created_at timestamptz not null default now()
 );
 
 create table if not exists tickets (
@@ -116,6 +132,7 @@ create table if not exists tickets (
   owner_id text not null,
   product_id bigint references products(id) on delete set null,
   product_variant jsonb,
+  payment_order_id uuid references payment_orders(id) on delete set null,
   purchase_status text not null default 'pending',
   approved_at timestamptz,
   rating integer,
@@ -144,5 +161,6 @@ alter table guild_resources enable row level security;
 alter table bot_settings enable row level security;
 alter table products enable row level security;
 alter table payment_settings enable row level security;
+alter table payment_orders enable row level security;
 alter table tickets enable row level security;
 alter table bot_logs enable row level security;

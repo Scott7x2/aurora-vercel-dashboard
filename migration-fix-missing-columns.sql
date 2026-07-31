@@ -83,8 +83,26 @@ create table if not exists payment_settings (
 );
 alter table payment_settings enable row level security;
 
+create table if not exists payment_orders (
+  id uuid primary key default gen_random_uuid(),
+  bot_instance_id uuid not null references bot_instances(id) on delete cascade,
+  ticket_thread_id text,
+  guild_id text not null,
+  buyer_id text not null,
+  product_id bigint references products(id) on delete set null,
+  product_name text not null default 'Produto',
+  product_variant jsonb,
+  amount_text text not null default '',
+  provider text not null default 'aurora',
+  status text not null default 'pending',
+  approved_at timestamptz,
+  created_at timestamptz not null default now()
+);
+alter table payment_orders enable row level security;
+
 alter table tickets add column if not exists status text not null default 'open';
 alter table tickets add column if not exists product_variant jsonb;
+alter table tickets add column if not exists payment_order_id uuid references payment_orders(id) on delete set null;
 alter table tickets add column if not exists purchase_status text not null default 'pending';
 alter table tickets add column if not exists approved_at timestamptz;
 alter table tickets add column if not exists rating integer;

@@ -331,7 +331,7 @@ function parseProductVariations() {
 
 function renderPayment() {
   const payment = state.payment || {};
-  if ($('paymentProvider')) $('paymentProvider').value = payment.provider || 'manual';
+  if ($('paymentProvider')) $('paymentProvider').value = payment.provider || 'aurora';
   if ($('checkoutMode')) $('checkoutMode').value = payment.checkout_mode || 'ticket';
   if ($('receiverName')) $('receiverName').value = payment.receiver_name || '';
   if ($('publicPaymentInstructions')) $('publicPaymentInstructions').value = payment.public_instructions || '';
@@ -341,6 +341,16 @@ function renderPayment() {
       ? `Dado privado salvo: ${payment.private_details_preview || 'criptografado'}`
       : 'Nenhum dado privado salvo. Use gateway intermediario para maior seguranca.';
   }
+}
+
+function renderProductMode() {
+  const type = $('productType')?.value || 'single';
+  document.querySelectorAll('[data-product-single]').forEach((node) => {
+    node.style.display = type === 'single' ? 'grid' : 'none';
+  });
+  document.querySelectorAll('[data-product-variation]').forEach((node) => {
+    node.style.display = type === 'variation' ? 'grid' : 'none';
+  });
 }
 
 async function selectGuild(id) {
@@ -492,6 +502,12 @@ async function addProduct() {
   if (!state.instance) return msg('Salve o bot antes de cadastrar produtos.', true);
   const productType = $('productType').value;
   const variations = parseProductVariations();
+  if (!$('productName').value.trim()) return msg('Digite o nome do produto.', true);
+  if (productType === 'single' && !$('productPrice').value.trim()) return msg('Digite o preco do produto unico.', true);
+  if (productType === 'variation' && !variations.length) return msg('Cadastre ao menos uma variacao. Ex: 7 dias | R$ 20,00 | acesso semanal', true);
+  $('addProduct').disabled = true;
+  $('addProduct').textContent = 'Adicionando...';
+  try {
   const product = await api(`/api/instances/${state.instance.id}/products`, {
     method: 'POST',
     body: JSON.stringify({
@@ -508,8 +524,13 @@ async function addProduct() {
   state.products.unshift(product);
   ['productName', 'productPrice', 'productStock', 'productImage', 'productDescription', 'productVariations', 'productDeliveryContent'].forEach((id) => { $(id).value = ''; });
   $('productType').value = 'single';
+  renderProductMode();
   renderProducts();
   msg('Produto cadastrado.');
+  } finally {
+    $('addProduct').disabled = false;
+    $('addProduct').textContent = 'Adicionar produto';
+  }
 }
 
 async function savePayment() {
@@ -574,6 +595,7 @@ function bind() {
   $('reloadResources').onclick = () => refreshResources().catch((error) => msg(error.message, true));
   $('saveSettings').onclick = () => saveSettings().catch((error) => msg(error.message, true));
   $('addProduct').onclick = () => addProduct().catch((error) => msg(error.message, true));
+  $('productType').onchange = renderProductMode;
   $('savePayment').onclick = () => savePayment().catch((error) => msg(error.message, true));
   $('reloadLogs').onclick = () => loadLogs().catch((error) => msg(error.message, true));
   $('uploadEmoji').onclick = () => uploadEmoji().catch((error) => msg(error.message, true));
@@ -587,6 +609,7 @@ function bind() {
 
 async function init() {
   bind();
+  renderProductMode();
   try {
     state.me = await api('/api/me');
     await loadGuilds();

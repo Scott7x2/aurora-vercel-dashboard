@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8">
@@ -96,62 +96,95 @@
             <strong>Para o cargo automatico funcionar</strong>
             <p>Ative <b>Server Members Intent</b> no Discord Developer Portal do bot e deixe o cargo do bot acima do cargo automatico. Sem isso, o Discord nao avisa quando alguem entra ou bloqueia a aplicacao do cargo.</p>
           </div>
-          <div class="grid">
-            <label><span>Cargo automatico</span><select id="auto_role_id" data-kind="role"></select></label>
-            <label><span>Cargo verificado</span><select id="verified_role_id" data-kind="role"></select></label>
-            <label><span>Canal boas-vindas</span><select id="welcome_channel_id" data-kind="channel"></select></label>
-            <label><span>Canal verificacao</span><select id="auth_channel_id" data-kind="channel"></select></label>
+          <div class="setting-card">
+            <h3>Fluxo de cargos</h3>
+            <div class="grid">
+              <label><span>Cargo automatico ao entrar</span><select id="auto_role_id" data-kind="role"></select></label>
+              <label><span>Cargo ao verificar</span><select id="verified_role_id" data-kind="role"></select></label>
+            </div>
+            <label class="check"><input id="remove_auto_role_after_verify" type="checkbox"> Remover cargo automatico apos verificar</label>
           </div>
-          <label class="check"><input id="remove_auto_role_after_verify" type="checkbox"> Remover cargo automatico apos verificar</label>
-          <div class="grid">
-            <label><span>Tipo boas-vindas</span><select id="welcome_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
-            <label><span>Cor boas-vindas</span><input id="welcome_color" type="color"></label>
-            <label><span>Titulo boas-vindas</span><input id="welcome_title"></label>
-            <label><span>Tipo verificacao</span><select id="auth_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
-            <label><span>Cor verificacao</span><input id="auth_color" type="color"></label>
-            <label><span>Titulo verificacao</span><input id="auth_title"></label>
-            <label><span>Texto botao</span><input id="auth_button_label"></label>
+
+          <div class="config-preview-row">
+            <div class="setting-card">
+              <h3>Boas-vindas</h3>
+              <div class="grid">
+                <label><span>Canal boas-vindas</span><select id="welcome_channel_id" data-kind="channel"></select></label>
+                <label><span>Tipo mensagem</span><select id="welcome_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
+              </div>
+              <label><span>Titulo boas-vindas</span><input id="welcome_title"></label>
+              <label><span>Mensagem boas-vindas</span><textarea id="welcome_message" rows="5"></textarea></label>
+            </div>
+            <div class="preview-rail">
+              <div id="welcome_preview" class="message-preview"></div>
+              <label><span>Cor boas-vindas</span><input id="welcome_color" type="color"></label>
+            </div>
           </div>
-          <label><span>Mensagem boas-vindas</span><textarea id="welcome_message" rows="4"></textarea></label>
-          <div id="welcome_preview" class="message-preview"></div>
-          <label><span>Mensagem verificacao</span><textarea id="auth_message" rows="4"></textarea></label>
-          <div id="auth_preview" class="message-preview"></div>
+
+          <div class="config-preview-row">
+            <div class="setting-card">
+              <h3>Verificacao</h3>
+              <div class="grid">
+                <label><span>Canal verificacao</span><select id="auth_channel_id" data-kind="channel"></select></label>
+                <label><span>Tipo mensagem</span><select id="auth_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
+                <label><span>Titulo verificacao</span><input id="auth_title"></label>
+                <label><span>Texto botao</span><input id="auth_button_label"></label>
+              </div>
+              <label><span>Mensagem verificacao</span><textarea id="auth_message" rows="5"></textarea></label>
+            </div>
+            <div class="preview-rail">
+              <div id="auth_preview" class="message-preview"></div>
+              <label><span>Cor verificacao</span><input id="auth_color" type="color"></label>
+            </div>
+          </div>
         </section>
 
         <section id="tab-tickets" class="tab">
           <div class="head"><div><h2>Tickets privados</h2><p>Topico privado para membro, dono e suporte.</p></div></div>
-          <div class="grid">
-            <label><span>Canal base</span><select id="ticket_channel_id" data-kind="channel"></select></label>
-            <label><span>Cargos suporte</span><select id="support_role_ids" data-kind="role" multiple size="5"></select></label>
-            <label><span>Tipo mensagem ticket</span><select id="ticket_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
-            <label><span>Cor ticket</span><input id="ticket_color" type="color"></label>
-            <label><span>Titulo</span><input id="ticket_title"></label>
-            <label><span>Texto botao</span><input id="ticket_button_label"></label>
+          <div class="config-preview-row">
+            <div class="setting-card">
+              <div class="grid">
+                <label><span>Canal base</span><select id="ticket_channel_id" data-kind="channel"></select></label>
+                <label><span>Cargos suporte</span><select id="support_role_ids" data-kind="role" multiple size="5"></select></label>
+                <label><span>Tipo mensagem ticket</span><select id="ticket_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
+                <label><span>Titulo</span><input id="ticket_title"></label>
+                <label><span>Texto botao</span><input id="ticket_button_label"></label>
+              </div>
+              <label><span>Mensagem tickets</span><textarea id="ticket_message" rows="5"></textarea></label>
+            </div>
+            <div class="preview-rail">
+              <div id="ticket_preview" class="message-preview"></div>
+              <label><span>Cor ticket</span><input id="ticket_color" type="color"></label>
+            </div>
           </div>
-          <label><span>Mensagem tickets</span><textarea id="ticket_message" rows="5"></textarea></label>
-          <div id="ticket_preview" class="message-preview"></div>
         </section>
 
         <section id="tab-sales" class="tab">
           <div class="head"><div><h2>Vendas e produtos</h2><p>Produtos viram botoes no painel de vendas.</p></div></div>
-          <div class="grid">
-            <label><span>Canal vitrine</span><select id="sales_channel_id" data-kind="channel"></select></label>
-            <label><span>Tipo vitrine</span><select id="sales_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
-            <label><span>Cor vitrine</span><input id="sales_color" type="color"></label>
-            <label><span>Titulo vitrine</span><input id="sales_title"></label>
+          <div class="config-preview-row">
+            <div class="setting-card">
+              <div class="grid">
+                <label><span>Canal vitrine</span><select id="sales_channel_id" data-kind="channel"></select></label>
+                <label><span>Tipo vitrine</span><select id="sales_mode"><option value="embed">Embed bonito</option><option value="simple">Mensagem simples</option></select></label>
+                <label><span>Titulo vitrine</span><input id="sales_title"></label>
+              </div>
+              <label><span>Mensagem vendas</span><textarea id="sales_message" rows="4"></textarea></label>
+            </div>
+            <div class="preview-rail">
+              <div id="sales_preview" class="message-preview"></div>
+              <label><span>Cor vitrine</span><input id="sales_color" type="color"></label>
+            </div>
           </div>
-          <label><span>Mensagem vendas</span><textarea id="sales_message" rows="4"></textarea></label>
-          <div id="sales_preview" class="message-preview"></div>
           <div class="payment-card">
             <div>
-              <h3>Recebimento seguro</h3>
-              <p>Use um gateway intermediario sempre que possivel. Assim seus dados bancarios reais ficam no provedor, nao no Discord nem no frontend.</p>
+              <h3>Aurora Pay interno</h3>
+              <p>Gateway intermediario do proprio painel: cada compra gera um pedido interno com ID, status e log. Ele organiza o checkout e evita expor dados reais no frontend; a aprovacao ainda fica com o dono/suporte.</p>
             </div>
             <div class="grid">
-              <label><span>Gateway / banco virtual</span><select id="paymentProvider"><option value="manual">Manual / combinar no ticket</option><option value="mercadopago">Mercado Pago</option><option value="stripe">Stripe</option><option value="pagseguro">PagSeguro</option><option value="asaas">Asaas</option><option value="other">Outro gateway</option></select></label>
-              <label><span>Modo do pagamento</span><select id="checkoutMode"><option value="ticket">Mostrar instrucao no ticket</option><option value="external">Gateway externo/intermediario</option></select></label>
+              <label><span>Gateway</span><select id="paymentProvider"><option value="aurora">Aurora Pay interno</option><option value="manual">Manual / combinar no ticket</option><option value="mercadopago">Mercado Pago</option><option value="stripe">Stripe</option><option value="pagseguro">PagSeguro</option><option value="asaas">Asaas</option><option value="other">Outro gateway</option></select></label>
+              <label><span>Fluxo</span><select id="checkoutMode"><option value="ticket">Pedido interno + ticket</option><option value="external">Link externo/intermediario</option></select></label>
               <label><span>Nome do recebedor</span><input id="receiverName" placeholder="Nome da loja ou recebedor"></label>
-              <label><span>Dado privado opcional</span><input id="privatePaymentDetails" type="password" placeholder="Pix/chave/token interno - fica criptografado"></label>
+              <label><span>Dado privado criptografado</span><input id="privatePaymentDetails" type="password" placeholder="Pix/chave/token interno - nao aparece no frontend"></label>
             </div>
             <label><span>Instrucoes publicas de pagamento</span><textarea id="publicPaymentInstructions" rows="3" placeholder="Ex: Apos abrir o ticket, envie o comprovante. Link do checkout: https://..."></textarea></label>
             <div class="actions">
@@ -160,14 +193,20 @@
             </div>
           </div>
           <div class="product-form">
-            <label><span>Tipo do produto</span><select id="productType"><option value="single">Produto unico</option><option value="variation">Produto com variacoes</option></select></label>
-            <input id="productName" placeholder="Produto">
-            <input id="productPrice" placeholder="Preco">
-            <input id="productStock" type="number" min="0" placeholder="Estoque opcional">
-            <input id="productImage" placeholder="Imagem opcional">
-            <textarea id="productDescription" rows="3" placeholder="Descricao"></textarea>
-            <textarea id="productVariations" rows="4" placeholder="Variacoes, uma por linha. Ex:&#10;1 dia | R$ 5,00 | Acesso por 24h&#10;7 dias | R$ 20,00 | Acesso semanal"></textarea>
-            <textarea id="productDeliveryContent" rows="4" placeholder="Conteudo da entrega automatica desse produto. Ex: login/senha, key, link privado ou instrucoes."></textarea>
+            <div class="form-title">
+              <h3>Novo produto</h3>
+              <p>Escolha produto unico quando existe so uma opcao. Use variacoes para planos como 1 dia, 7 dias, 30 dias.</p>
+            </div>
+            <div class="grid">
+              <label><span>Tipo do produto</span><select id="productType"><option value="single">Produto unico</option><option value="variation">Produto com variacoes</option></select></label>
+              <label><span>Nome do produto</span><input id="productName" placeholder="Ex: Nitro, Conta, Spoofer"></label>
+              <label data-product-single><span>Preco do produto unico</span><input id="productPrice" placeholder="Ex: R$ 19,90"></label>
+              <label><span>Estoque opcional</span><input id="productStock" type="number" min="0" placeholder="Deixe vazio para ilimitado"></label>
+              <label><span>Imagem opcional</span><input id="productImage" placeholder="https://..."></label>
+            </div>
+            <label><span>Descricao</span><textarea id="productDescription" rows="3" placeholder="Explique o que o comprador recebe."></textarea></label>
+            <label data-product-variation><span>Variacoes</span><textarea id="productVariations" rows="5" placeholder="Uma por linha usando: Nome | Preco | Descricao opcional&#10;1 dia | R$ 5,00 | Acesso por 24h&#10;7 dias | R$ 20,00 | Acesso semanal"></textarea></label>
+            <label><span>Conteudo para entrega automatica</span><textarea id="productDeliveryContent" rows="4" placeholder="Ex: login/senha, key, link privado ou instrucoes. So sera enviado se Pos-compra estiver como entrega automatica."></textarea></label>
             <button id="addProduct" class="primary">Adicionar produto</button>
           </div>
           <div id="products"></div>
@@ -181,20 +220,32 @@
           </div>
           <div class="grid">
             <label><span>Tipo de entrega</span><select id="delivery_mode"><option value="manual">Manual - avisar comprador</option><option value="auto">Automatica - enviar conteudo do produto</option></select></label>
-            <label><span>Cor da entrega</span><input id="delivery_color" type="color"></label>
             <label><span>Titulo da entrega</span><input id="delivery_title"></label>
             <label><span>Avisar estoque acabando em</span><input id="stock_warn_threshold" type="number" min="0" placeholder="3"></label>
           </div>
-          <label><span>Mensagem enviada no privado apos aprovar</span><textarea id="delivery_message" rows="5" placeholder="Use {user}, {product}, {price}, {variation}, {deliveryContent}, {server}"></textarea></label>
-          <div id="delivery_preview" class="message-preview"></div>
-          <div class="grid">
-            <label><span>Canal de avaliacoes</span><select id="review_channel_id" data-kind="channel"></select></label>
-            <label><span>Cor avaliacao</span><input id="review_color" type="color"></label>
-            <label><span>Titulo avaliacao</span><input id="review_title"></label>
-            <label><span>Imagem/GIF da avaliacao</span><input id="review_gif_url" placeholder="https://...gif ou imagem"></label>
+          <div class="config-preview-row">
+            <div class="setting-card">
+              <label><span>Mensagem enviada no privado apos aprovar</span><textarea id="delivery_message" rows="6" placeholder="Use {user}, {product}, {price}, {variation}, {deliveryContent}, {server}"></textarea></label>
+            </div>
+            <div class="preview-rail">
+              <div id="delivery_preview" class="message-preview"></div>
+              <label><span>Cor da entrega</span><input id="delivery_color" type="color"></label>
+            </div>
           </div>
-          <label><span>Mensagem do embed de avaliacao</span><textarea id="review_message" rows="4" placeholder="{user} avaliou {product} com {stars} estrelas."></textarea></label>
-          <div id="review_preview" class="message-preview review-demo"></div>
+          <div class="config-preview-row">
+            <div class="setting-card">
+              <div class="grid">
+                <label><span>Canal de avaliacoes</span><select id="review_channel_id" data-kind="channel"></select></label>
+                <label><span>Titulo avaliacao</span><input id="review_title"></label>
+                <label><span>Imagem/GIF da avaliacao</span><input id="review_gif_url" placeholder="https://...gif ou imagem"></label>
+              </div>
+              <label><span>Mensagem do embed de avaliacao</span><textarea id="review_message" rows="4" placeholder="{user} avaliou {product} com {stars} estrelas."></textarea></label>
+            </div>
+            <div class="preview-rail">
+              <div id="review_preview" class="message-preview review-demo"></div>
+              <label><span>Cor avaliacao</span><input id="review_color" type="color"></label>
+            </div>
+          </div>
         </section>
 
         <section id="tab-logs" class="tab">
@@ -214,7 +265,7 @@
           <div class="grid">
             <label><span>Nome da loja</span><input id="brand_name"></label>
             <label><span>Cor</span><input id="brand_color" type="color"></label>
-            <label><span>Emoji dos botoes</span><input id="button_emoji" placeholder="Ex: ✅ ou <:aurora:123>"></label>
+            <label><span>Emoji dos botoes</span><input id="button_emoji" placeholder="Ex: âœ… ou <:aurora:123>"></label>
           </div>
           <div class="emoji-uploader">
             <div>
@@ -262,3 +313,4 @@
     <script type="module" src="/app.js"></script>
   </body>
 </html>
+

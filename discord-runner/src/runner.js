@@ -232,6 +232,7 @@ function paymentText(payment) {
   if (!payment) return 'Pagamento: combine os detalhes com o suporte neste ticket.';
   const lines = [];
   const providerNames = {
+    aurora: 'Aurora Pay interno',
     manual: 'Manual / combinado no ticket',
     mercadopago: 'Mercado Pago',
     stripe: 'Stripe',
@@ -243,7 +244,7 @@ function paymentText(payment) {
   if (payment.receiver_name) lines.push(`Recebedor: **${payment.receiver_name}**`);
   if (payment.checkout_mode === 'external') lines.push('Modo: gateway intermediario/checkout externo.');
   if (payment.public_instructions) lines.push(payment.public_instructions);
-  if (payment.provider === 'manual' && payment.private_details_encrypted) {
+  if ((payment.provider === 'manual' || payment.provider === 'aurora') && payment.private_details_encrypted) {
     try {
       lines.push(`Dados privados configurados: **${decrypt(payment.private_details_encrypted)}**`);
     } catch {
@@ -368,11 +369,31 @@ async function openTicket(interaction, instance, productId = null, variantIndex 
     invitable: false
   });
   await addTicketMembers(thread, interaction, settings);
+  let order = null;
+  if (item) {
+    order = await one(`
+      insert into payment_orders (
+        bot_instance_id,ticket_thread_id,guild_id,buyer_id,product_id,product_name,product_variant,amount_text,provider,status
+      ) values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,'pending')
+      returning *
+    `, [
+      instance.id,
+      thread.id,
+      interaction.guildId,
+      interaction.user.id,
+      item.id,
+      item.name,
+      JSON.stringify(variant || null),
+      chosenPrice(item, variant),
+      payment?.provider || 'aurora'
+    ]);
+  }
   await query(`
     insert into tickets (thread_id,bot_instance_id,guild_id,owner_id,product_id,product_variant,status,closed_at)
     values ($1,$2,$3,$4,$5,$6::jsonb,'open',null)
     on conflict (thread_id) do update set status='open', closed_at=null
   `, [thread.id, instance.id, interaction.guildId, interaction.user.id, item?.id || null, JSON.stringify(variant || null)]);
+  if (order) await query('update tickets set payment_order_id=$1 where thread_id=$2', [order.id, thread.id]);
   const mentions = (settings.support_role_ids || []).map((id) => `<@&${id}>`).join(' ');
   const ticketContext = { interaction, settings, product: item, variant, thread };
   await thread.send({
@@ -381,7 +402,7 @@ async function openTicket(interaction, instance, productId = null, variantIndex 
       settings,
       renderTemplate(item ? 'Novo pedido de {user}' : 'Novo ticket de {user}', ticketContext),
       item
-        ? renderTemplate(`Produto: **{product}**\n${variant ? 'Variacao: **{variation}**\n' : ''}Preco: **${chosenPrice(item, variant)}**\n{productDescription}${variant?.description ? '\n{variationDescription}' : ''}\n\n${paymentText(payment)}`, ticketContext)
+        ? renderTemplate(`ID do pedido: **${order?.id || 'gerando'}**\nProduto: **{product}**\n${variant ? 'Variacao: **{variation}**\n' : ''}Preco: **${chosenPrice(item, variant)}**\n{productDescription}${variant?.description ? '\n{variationDescription}' : ''}\n\n${paymentText(payment)}`, ticketContext)
         : renderTemplate('Ola {user}, descreva o atendimento. {supportRoleMentions}', ticketContext),
       settings.ticket_color
     )],
@@ -425,6 +446,9 @@ async function approvePurchase(interaction, instance) {
   }
 
   await query("update tickets set purchase_status='approved', approved_at=now() where thread_id=$1", [ticket.thread_id]);
+  if (ticket.payment_order_id) {
+    await query("update payment_orders set status='approved', approved_at=now() where id=$1 and bot_instance_id=$2", [ticket.payment_order_id, instance.id]);
+  }
   const buyer = await interaction.client.users.fetch(ticket.owner_id).catch(() => null);
   const deliveryContent = settings.delivery_mode === 'auto' ? (item.delivery_content || 'Entrega automatica configurada, mas esse produto nao possui conteudo salvo.') : '';
   const context = { interaction, settings, product: item, variant, deliveryContent };
