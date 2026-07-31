@@ -12,11 +12,18 @@ import {
   PermissionFlagsBits,
   SlashCommandBuilder
 } from 'discord.js';
-import { createClient } from '@supabase/supabase-js';
+import pg from 'pg';
 
-const db = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-const key = Buffer.from(process.env.BOT_ENCRYPTION_KEY || '', 'base64');
+const { Pool } = pg;
+const env = (name) => String(process.env[name] || '').trim();
+for (const name of ['DATABASE_URL', 'BOT_ENCRYPTION_KEY']) {
+  if (!env(name)) throw new Error(`${name} nao configurada.`);
+}
+const pool = new Pool({ connectionString: env('DATABASE_URL'), ssl: { rejectUnauthorized: false }, max: 5 });
+const key = Buffer.from(env('BOT_ENCRYPTION_KEY'), 'base64');
 if (key.length !== 32) throw new Error('BOT_ENCRYPTION_KEY deve ser Base64 de 32 bytes.');
+const pollInterval = Math.max(Number(env('POLL_INTERVAL_MS')) || 8000, 3000);
+const runnerName = env('RUNNER_NAME') || 'aurora-zero-runner';
 
 const running = new Map();
 const commands = [
@@ -40,6 +47,15 @@ const commands = [
       .addChannelTypes(ChannelType.GuildText))
 ].map((command) => command.toJSON());
 
+async function query(sql, params = []) {
+  const result = await pool.query(sql, params);
+  return result.rows;
+}
+
+async function one(sql, params = []) {
+  return (await query(sql, params))[0] || null;
+}
+
 function decrypt(value) {
   const [iv, data, tag] = value.split('.').map((part) => Buffer.from(part, 'base64'));
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
@@ -51,8 +67,19 @@ function row(...items) {
   return new ActionRowBuilder().addComponents(...items);
 }
 
-function btn(id, label, style) {
-  return new ButtonBuilder().setCustomId(id).setLabel(String(label || 'Abrir').slice(0, 80)).setStyle(style);
+function parseEmoji(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const custom = raw.match(/^<(?<animated>a?):(?<name>[a-zA-Z0-9_]+):(?<id>\d+)>$/);
+  if (custom?.groups) return { name: custom.groups.name, id: custom.groups.id, animated: custom.groups.animated === 'a' };
+  return { name: raw };
+}
+
+function btn(id, label, style, emojiText) {
+  const button = new ButtonBuilder().setCustomId(id).setLabel(String(label || 'Abrir').slice(0, 80)).setStyle(style);
+  const emoji = parseEmoji(emojiText);
+  if (emoji) button.setEmoji(emoji);
+  return button;
 }
 
 function embed(settings, title, description) {
@@ -63,27 +90,70 @@ function embed(settings, title, description) {
     .setFooter({ text: settings.brand_name || 'Aurora Store' });
 }
 
+function roleName(guild, id) {
+  return id ? (guild?.roles?.cache?.get(id)?.name || id) : '';
+}
+
+function channelName(guild, id) {
+  return id ? (guild?.channels?.cache?.get(id)?.name || id) : '';
+}
+
+function renderTemplate(template, context = {}) {
+  const settings = context.settings || {};
+  const guild = context.guild || context.interaction?.guild || context.member?.guild;
+  const user = context.user || context.interaction?.user || context.member?.user;
+  const channel = context.channel || context.interaction?.channel;
+  const supportIds = Array.isArray(settings.support_role_ids) ? settings.support_role_ids : [];
+  const now = new Date();
+  const vars = {
+    user: user ? `<@${user.id}>` : '',
+    userMention: user ? `<@${user.id}>` : '',
+    userId: user?.id || '',
+    username: user?.username || context.member?.displayName || '',
+    server: guild?.name || '',
+    guild: guild?.name || '',
+    memberCount: guild?.memberCount ? String(guild.memberCount) : '',
+    channel: channel ? `<#${channel.id}>` : '',
+    channelMention: channel ? `<#${channel.id}>` : '',
+    channelName: channel?.name || '',
+    owner: guild?.ownerId ? `<@${guild.ownerId}>` : '',
+    autoRole: roleName(guild, settings.auto_role_id),
+    autoRoleMention: settings.auto_role_id ? `<@&${settings.auto_role_id}>` : '',
+    verifiedRole: roleName(guild, settings.verified_role_id),
+    verifiedRoleMention: settings.verified_role_id ? `<@&${settings.verified_role_id}>` : '',
+    supportRoles: supportIds.map((id) => roleName(guild, id)).filter(Boolean).join(', '),
+    supportRoleMentions: supportIds.map((id) => `<@&${id}>`).join(' '),
+    welcomeChannel: channelName(guild, settings.welcome_channel_id),
+    authChannel: channelName(guild, settings.auth_channel_id),
+    ticketChannel: channelName(guild, settings.ticket_channel_id),
+    salesChannel: channelName(guild, settings.sales_channel_id),
+    product: context.product?.name || '',
+    price: context.product?.price || '',
+    productDescription: context.product?.description || '',
+    ticket: context.thread ? `<#${context.thread.id}>` : '',
+    ticketId: context.thread?.id || '',
+    emoji: settings.button_emoji || '',
+    date: now.toLocaleDateString('pt-BR'),
+    time: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  };
+  return String(template || '').replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key) => vars[key] ?? '');
+}
+
 async function setError(id, message) {
-  await db.from('bot_instances').update({ last_error: message, last_seen_at: null }).eq('id', id);
+  await query('update bot_instances set last_error=$1, last_seen_at=null, updated_at=now() where id=$2', [String(message || '').slice(0, 500), id]);
 }
 
 async function getSettings(instanceId) {
-  await db.from('bot_settings').upsert({ bot_instance_id: instanceId }, { onConflict: 'bot_instance_id', ignoreDuplicates: true });
-  const { data, error } = await db.from('bot_settings').select('*').eq('bot_instance_id', instanceId).single();
-  if (error) throw error;
-  return data;
+  await query('insert into bot_settings (bot_instance_id) values ($1) on conflict (bot_instance_id) do nothing', [instanceId]);
+  return one('select * from bot_settings where bot_instance_id=$1', [instanceId]);
 }
 
 async function products(instanceId) {
-  const { data, error } = await db.from('products').select('*').eq('bot_instance_id', instanceId).eq('active', true).order('created_at', { ascending: false });
-  if (error) throw error;
-  return data || [];
+  return query('select * from products where bot_instance_id=$1 and active=true order by created_at desc', [instanceId]);
 }
 
 async function product(instanceId, id) {
-  const { data, error } = await db.from('products').select('*').eq('bot_instance_id', instanceId).eq('id', id).maybeSingle();
-  if (error) throw error;
-  return data;
+  return one('select * from products where bot_instance_id=$1 and id=$2', [instanceId, id]);
 }
 
 async function sync(instance, client) {
@@ -103,23 +173,28 @@ async function sync(instance, client) {
     .map((role) => ({ id: role.id, name: role.name, color: role.hexColor }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  await db.from('guild_resources').upsert({ bot_instance_id: instance.id, channels, roles, updated_at: new Date().toISOString() }, { onConflict: 'bot_instance_id' });
-  await db.from('bot_instances').update({ guild_name: guild.name, last_seen_at: new Date().toISOString(), last_error: null }).eq('id', instance.id);
+  await query(`
+    insert into guild_resources (bot_instance_id,channels,roles,updated_at)
+    values ($1,$2::jsonb,$3::jsonb,now())
+    on conflict (bot_instance_id) do update set channels=excluded.channels, roles=excluded.roles, updated_at=now()
+  `, [instance.id, JSON.stringify(channels), JSON.stringify(roles)]);
+  await query('update bot_instances set guild_name=$1,last_seen_at=now(),last_error=null,updated_at=now() where id=$2', [guild.name, instance.id]);
   await guild.commands.set(commands);
 }
 
-async function panel(instanceId, type) {
+async function panel(instanceId, type, context = {}) {
   const settings = await getSettings(instanceId);
+  context.settings = settings;
   if (type === 'auth') {
     return {
-      embeds: [embed(settings, settings.auth_title, settings.auth_message)],
-      components: [row(btn('az:auth', settings.auth_button_label, ButtonStyle.Success))]
+      embeds: [embed(settings, renderTemplate(settings.auth_title, context), renderTemplate(settings.auth_message, context))],
+      components: [row(btn('az:auth', renderTemplate(settings.auth_button_label, context), ButtonStyle.Success, settings.button_emoji))]
     };
   }
   if (type === 'ticket') {
     return {
-      embeds: [embed(settings, settings.ticket_title, settings.ticket_message)],
-      components: [row(btn('az:ticket', settings.ticket_button_label, ButtonStyle.Primary))]
+      embeds: [embed(settings, renderTemplate(settings.ticket_title, context), renderTemplate(settings.ticket_message, context))],
+      components: [row(btn('az:ticket', renderTemplate(settings.ticket_button_label, context), ButtonStyle.Primary, settings.button_emoji))]
     };
   }
   const items = await products(instanceId);
@@ -127,9 +202,9 @@ async function panel(instanceId, type) {
   items.slice(0, 25).forEach((item, index) => {
     const n = Math.floor(index / 5);
     rows[n] ||= new ActionRowBuilder();
-    rows[n].addComponents(btn(`az:buy:${item.id}`, item.name, ButtonStyle.Success));
+    rows[n].addComponents(btn(`az:buy:${item.id}`, renderTemplate(item.name, { ...context, product: item }), ButtonStyle.Success, settings.button_emoji));
   });
-  return { embeds: [embed(settings, settings.sales_title, settings.sales_message)], components: rows };
+  return { embeds: [embed(settings, renderTemplate(settings.sales_title, context), renderTemplate(settings.sales_message, context))], components: rows };
 }
 
 async function addTicketMembers(thread, interaction, settings) {
@@ -155,20 +230,22 @@ async function openTicket(interaction, instance, productId = null) {
     invitable: false
   });
   await addTicketMembers(thread, interaction, settings);
-  await db.from('tickets').upsert({
-    thread_id: thread.id,
-    bot_instance_id: instance.id,
-    guild_id: interaction.guildId,
-    owner_id: interaction.user.id,
-    product_id: item?.id || null,
-    status: 'open',
-    closed_at: null
-  }, { onConflict: 'thread_id' });
+  await query(`
+    insert into tickets (thread_id,bot_instance_id,guild_id,owner_id,product_id,status,closed_at)
+    values ($1,$2,$3,$4,$5,'open',null)
+    on conflict (thread_id) do update set status='open', closed_at=null
+  `, [thread.id, instance.id, interaction.guildId, interaction.user.id, item?.id || null]);
   const mentions = (settings.support_role_ids || []).map((id) => `<@&${id}>`).join(' ');
   await thread.send({
     content: `${interaction.user} ${mentions}`.trim(),
-    embeds: [embed(settings, item ? 'Novo pedido' : 'Novo ticket', item ? `Produto: **${item.name}**\nPreco: **${item.price}**\n${item.description || ''}` : `Ola ${interaction.user}, descreva o atendimento.`)],
-    components: [row(btn('az:close', 'Fechar ticket', ButtonStyle.Danger))]
+    embeds: [embed(
+      settings,
+      renderTemplate(item ? 'Novo pedido de {user}' : 'Novo ticket de {user}', { interaction, settings, product: item, thread }),
+      item
+        ? renderTemplate(`Produto: **{product}**\nPreco: **{price}**\n{productDescription}`, { interaction, settings, product: item, thread })
+        : renderTemplate('Ola {user}, descreva o atendimento. {supportRoleMentions}', { interaction, settings, thread })
+    )],
+    components: [row(btn('az:close', 'Fechar ticket', ButtonStyle.Danger, settings.button_emoji))]
   });
   return interaction.reply({ content: `Ticket criado: ${thread}`, ephemeral: true });
 }
@@ -176,11 +253,11 @@ async function openTicket(interaction, instance, productId = null) {
 async function closeTicket(interaction, instance) {
   if (!interaction.channel?.isThread?.()) return interaction.reply({ content: 'Use dentro de um ticket.', ephemeral: true });
   const settings = await getSettings(instance.id);
-  const { data: ticket } = await db.from('tickets').select('*').eq('thread_id', interaction.channel.id).maybeSingle();
+  const ticket = await one('select * from tickets where thread_id=$1', [interaction.channel.id]);
   const support = Array.isArray(settings.support_role_ids) ? settings.support_role_ids : [];
   const allowed = ticket?.owner_id === interaction.user.id || interaction.memberPermissions?.has(PermissionFlagsBits.ManageThreads) || support.some((roleId) => interaction.member?.roles?.cache?.has(roleId));
   if (!allowed) return interaction.reply({ content: 'Apenas o autor ou suporte pode fechar.', ephemeral: true });
-  await db.from('tickets').update({ status: 'closed', closed_at: new Date().toISOString() }).eq('thread_id', interaction.channel.id);
+  await query("update tickets set status='closed', closed_at=now() where thread_id=$1", [interaction.channel.id]);
   await interaction.reply('Ticket fechado.');
   setTimeout(() => interaction.channel.setArchived(true).catch(() => null), 2500);
 }
@@ -191,7 +268,7 @@ async function handle(interaction, instance) {
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: 'Voce precisa de Gerenciar Servidor.', ephemeral: true });
     const type = interaction.options.getString('tipo', true);
     const channel = interaction.options.getChannel('canal', true);
-    const payload = await panel(instance.id, type);
+    const payload = await panel(instance.id, type, { interaction, channel });
     if (type === 'sales' && !payload.components.length) return interaction.reply({ content: 'Cadastre produtos no site antes de publicar.', ephemeral: true });
     await channel.send(payload);
     return interaction.reply({ content: `Painel publicado em ${channel}.`, ephemeral: true });
@@ -214,9 +291,14 @@ async function start(instance) {
   if (running.has(instance.id)) return;
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
   client.once(Events.ClientReady, async () => {
-    console.log(`Online: ${client.user.tag} / ${instance.guild_name}`);
+    console.log(`[${runnerName}] Online: ${client.user.tag} / ${instance.guild_name}`);
     await sync(instance, client).catch((error) => setError(instance.id, error.message));
   });
+  client.on(Events.Error, (error) => {
+    console.error(`[${runnerName}] Discord client error (${instance.bot_name || instance.id}):`, error);
+    setError(instance.id, error.message).catch(console.error);
+  });
+  client.on(Events.Warn, (warning) => console.warn(`[${runnerName}] Discord warning (${instance.bot_name || instance.id}):`, warning));
   client.on(Events.GuildCreate, () => sync(instance, client).catch((error) => setError(instance.id, error.message)));
   client.on(Events.GuildMemberAdd, async (member) => {
     if (member.guild.id !== instance.guild_id) return;
@@ -225,8 +307,13 @@ async function start(instance) {
     if (!settings.welcome_channel_id) return;
     const channel = await member.guild.channels.fetch(settings.welcome_channel_id).catch(() => null);
     if (!channel?.isTextBased?.()) return;
-    const body = (settings.welcome_message || '').replaceAll('{user}', `<@${member.id}>`).replaceAll('{server}', member.guild.name).replaceAll('{memberCount}', String(member.guild.memberCount));
-    await channel.send({ embeds: [embed(settings, settings.welcome_title, body)] }).catch(() => null);
+    await channel.send({
+      embeds: [embed(
+        settings,
+        renderTemplate(settings.welcome_title, { member, settings, channel }),
+        renderTemplate(settings.welcome_message, { member, settings, channel })
+      )]
+    }).catch(() => null);
   });
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
@@ -256,13 +343,28 @@ async function stop(id) {
 }
 
 async function reconcile() {
-  const { data, error } = await db.from('bot_instances').select('*').eq('enabled', true);
-  if (error) throw error;
+  const data = await query('select * from bot_instances where enabled=true');
   const ids = new Set((data || []).map((item) => item.id));
   for (const instance of data || []) await start(instance);
   for (const id of running.keys()) if (!ids.has(id)) await stop(id);
 }
 
-console.log('Aurora Zero runner iniciado.');
+async function shutdown(signal) {
+  console.log(`[${runnerName}] Encerrando por ${signal}.`);
+  for (const id of [...running.keys()]) await stop(id);
+  await pool.end();
+  process.exit(0);
+}
+
+process.on('SIGINT', () => shutdown('SIGINT').catch((error) => {
+  console.error(error);
+  process.exit(1);
+}));
+process.on('SIGTERM', () => shutdown('SIGTERM').catch((error) => {
+  console.error(error);
+  process.exit(1);
+}));
+
+console.log(`[${runnerName}] Aurora Zero runner iniciado. Poll: ${pollInterval}ms.`);
 await reconcile();
-setInterval(() => reconcile().catch((error) => console.error(error)), 30000);
+setInterval(() => reconcile().catch((error) => console.error(error)), pollInterval);

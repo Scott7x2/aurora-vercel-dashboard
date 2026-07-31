@@ -17,6 +17,7 @@ create table if not exists bot_instances (
   guild_id text not null,
   guild_name text not null default 'Servidor',
   bot_name text not null default 'Aurora Sales',
+  bot_client_id text,
   token_encrypted text not null,
   enabled boolean not null default false,
   last_seen_at timestamptz,
@@ -55,6 +56,10 @@ create table if not exists bot_settings (
   sales_channel_id text,
   sales_title text not null default 'Vitrine',
   sales_message text not null default 'Escolha um produto para iniciar sua compra.',
+  button_emoji text,
+  custom_emoji_id text,
+  custom_emoji_name text,
+  custom_emoji_animated boolean not null default false,
   updated_at timestamptz not null default now()
 );
 
