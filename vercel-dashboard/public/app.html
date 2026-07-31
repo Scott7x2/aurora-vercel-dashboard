@@ -141,9 +141,18 @@
             <button type="button" data-refresh-resources>Sincronizar cargos e canais</button>
           </div>
           <div class="resource-status"><i></i><span data-resource-summary>Nenhum recurso sincronizado</span></div>
-          <div class="saved-help">
-            <strong>Para o cargo automatico funcionar</strong>
-            <p>Ative <b>Server Members Intent</b> no Discord Developer Portal do bot, use o botao <b>Adicionar bot ao servidor</b> para garantir <b>Gerenciar Cargos</b> e deixe o cargo do bot acima do cargo automatico. Sem Members Intent, o Discord nao envia o evento de entrada e nenhum bot consegue identificar quem entrou.</p>
+          <div class="intent-guide">
+            <div class="intent-guide-head">
+              <div><span class="guide-badge">OBRIGATORIO</span><h3>Ative a deteccao de novos membros</h3><p>Sem esta configuracao o Discord nao informa ao bot quem entrou.</p></div>
+              <a data-developer-bot-link href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Abrir configuracao do bot</a>
+            </div>
+            <div class="intent-steps">
+              <article><b>1</b><span>No Developer Portal, selecione a aplicacao do bot e abra <strong>Bot</strong>.</span></article>
+              <article><b>2</b><span>Desca ate <strong>Privileged Gateway Intents</strong>.</span></article>
+              <article><b>3</b><span>Ative <strong>Server Members Intent</strong> e clique em <strong>Save Changes</strong>.</span></article>
+              <article><b>4</b><span>No Discord, de <strong>Gerenciar Cargos</strong> ao bot e coloque o cargo dele acima do cargo automatico.</span></article>
+            </div>
+            <div class="intent-checklist"><span>✓ Server Members Intent</span><span>✓ Gerenciar Cargos</span><span>✓ Cargo do bot acima</span></div>
           </div>
           <div class="setting-card">
             <h3>Fluxo de cargos</h3>
@@ -181,7 +190,7 @@
           <div class="resource-status"><i></i><span data-resource-summary>Nenhum recurso sincronizado</span></div>
           <div class="saved-help">
             <strong>Envio confiavel</strong>
-            <p>O runner acompanha novas entradas e tambem verifica membros que chegaram nos ultimos minutos, evitando perder a mensagem durante uma reconexao. O <b>Server Members Intent</b> precisa estar ativo.</p>
+            <p>O runner acompanha novas entradas e tambem verifica membros que chegaram nos ultimos minutos. Antes de testar, confirme o <b>Server Members Intent</b> usando o tutorial em <b>Painel → Cargos e acesso</b>. <a data-developer-bot-link href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Abrir Developer Portal</a>.</p>
           </div>
           <div class="config-preview-row">
             <div class="setting-card">

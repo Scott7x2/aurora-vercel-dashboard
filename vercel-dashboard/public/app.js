@@ -136,6 +136,11 @@ function header() {
     invite.classList.toggle('disabled', !state.instance?.invite_url);
     invite.textContent = state.instance?.invite_url ? 'Adicionar bot ao servidor' : 'Salve um token valido para gerar o convite';
   }
+  document.querySelectorAll('[data-developer-bot-link]').forEach((link) => {
+    link.href = state.instance?.bot_client_id
+      ? `https://discord.com/developers/applications/${state.instance.bot_client_id}/bot`
+      : 'https://discord.com/developers/applications';
+  });
   const warning = $('runtimeWarning');
   if (warning) {
     warning.textContent = state.instance?.runtime_warning || '';
