@@ -136,6 +136,21 @@ h2 { font-size: 18px; }
 .tutorial-card ol { margin: 0; padding-left: 20px; color: var(--muted); line-height: 1.55; font-size: 13px; }
 .tutorial-card p { color: var(--muted); font-size: 13px; }
 .tutorial-card a { color: #9fb0ff; font-weight: 700; }
+.token-guide { display: grid; gap: 16px; padding: 20px; border: 1px solid rgba(109,135,255,.65); border-radius: 12px; background: linear-gradient(135deg, rgba(69,104,255,.18), rgba(13,21,44,.96)); box-shadow: 0 14px 38px rgba(0,0,0,.2); }
+.token-guide-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.token-guide-head h3 { margin: 7px 0 5px; font-size: 19px; }
+.token-guide-head p { color: var(--muted); font-size: 13px; }
+.guide-badge { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: #4568ff; color: white; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+.developer-portal-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; border-radius: 8px; background: #5865f2; color: white; text-decoration: none; font-weight: 800; white-space: nowrap; }
+.developer-portal-link:hover { filter: brightness(1.12); }
+.token-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.token-steps article { display: flex; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: rgba(8,13,27,.7); }
+.token-steps article > b { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px; border-radius: 50%; background: #4568ff; color: white; }
+.token-steps article div { display: grid; gap: 4px; }
+.token-steps article strong { font-size: 13px; }
+.token-steps article span { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.token-security { padding: 10px 12px; border: 1px solid rgba(255,208,102,.38); border-radius: 8px; background: rgba(255,208,102,.08); color: #ffe7a3; font-size: 12px; line-height: 1.45; }
+.invite-help { color: var(--muted); font-size: 12px; line-height: 1.45; }
 .variables { display: block; }
 .variables code { display: inline-block; margin: 6px 6px 0 0; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: #080d1b; color: #dbe4ff; font-size: 12px; }
 .variable-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
@@ -154,4 +169,7 @@ footer { position: sticky; bottom: 0; padding: 14px; border: 1px solid var(--lin
   .preview-rail { position: static; }
   .saved-bot-card { align-items: stretch; flex-direction: column; }
   .saved-bot-actions { justify-content: flex-start; }
+  .token-guide-head { align-items: stretch; flex-direction: column; }
+  .token-steps { grid-template-columns: 1fr; }
+  .developer-portal-link { width: 100%; }
 }

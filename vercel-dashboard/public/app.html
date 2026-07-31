@@ -97,6 +97,22 @@
             <div><h2>Bot separado por servidor</h2><p>Ao salvar um token valido, o bot e ativado automaticamente. A central 24h hospedada por voce inicia essa instancia em poucos segundos.</p></div>
             <label class="switch"><input id="enabled" type="checkbox"><span></span></label>
           </div>
+          <div class="token-guide">
+            <div class="token-guide-head">
+              <div>
+                <span class="guide-badge">COMECE AQUI</span>
+                <h3>Crie seu bot e copie o token</h3>
+                <p>Leva poucos minutos. O token identifica seu bot e deve ser mantido em segredo.</p>
+              </div>
+              <a class="developer-portal-link" href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Abrir Discord Developer Portal</a>
+            </div>
+            <div class="token-steps">
+              <article><b>1</b><div><strong>Crie a aplicacao</strong><span>Clique em New Application, escolha o nome e confirme.</span></div></article>
+              <article><b>2</b><div><strong>Copie o token</strong><span>Abra Bot, use Reset Token e depois Copy Token.</span></div></article>
+              <article><b>3</b><div><strong>Ative os intents</strong><span>Em Bot, ative Server Members Intent e Message Content Intent.</span></div></article>
+            </div>
+            <div class="token-security"><strong>Nunca envie seu token para outra pessoa.</strong> Cole-o somente abaixo. Ele e enviado ao backend e armazenado criptografado.</div>
+          </div>
           <div class="saved-help">
             <strong>Inicializacao pelo site</strong>
             <p>O usuario nao precisa baixar nada. Ele salva o token aqui, clica para ativar e a central 24h liga o bot automaticamente. O Vercel cuida do painel; o runner hospedado separadamente mantem os bots conectados ao Discord.</p>
@@ -111,19 +127,7 @@
             <button id="reloadResources">Atualizar cargos e canais</button>
           </div>
           <a id="inviteBot" class="invite-link disabled" href="#" target="_blank" rel="noreferrer">Adicionar bot ao servidor</a>
-          <div class="tutorial-card">
-            <h3>Como pegar o token do seu proprio bot</h3>
-            <ol>
-              <li>Acesse <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a>.</li>
-              <li>Clique em <strong>New Application</strong>, escolha um nome e confirme.</li>
-              <li>Entre em <strong>Bot</strong> e clique em <strong>Add Bot</strong>, se ainda nao existir.</li>
-              <li>Em <strong>Token</strong>, clique em <strong>Reset Token</strong> ou <strong>Copy Token</strong>.</li>
-              <li>Cole esse token no campo acima e clique em <strong>Salvar bot</strong>.</li>
-              <li>Em <strong>Bot</strong>, ative <strong>Server Members Intent</strong> para autorole e boas-vindas.</li>
-              <li>Em <strong>OAuth2 > URL Generator</strong>, marque <strong>bot</strong> e <strong>applications.commands</strong>, escolha as permissoes e convide para o servidor.</li>
-            </ol>
-            <p>O botao <b>Adicionar bot ao servidor</b> ja abre o convite com as permissoes recomendadas: Gerenciar Cargos, Gerenciar Canais, Gerenciar Expressoes/Emojis, Gerenciar Threads, Criar Threads Privadas, Enviar Mensagens, Enviar em Threads, Usar Comandos, Ver Canais, Embeds, Anexos e Historico.</p>
-          </div>
+          <p class="invite-help">Depois de salvar, use o botao acima. O convite ja inclui as permissoes necessarias para cargos, canais, tickets, vendas, emojis e comandos.</p>
         </section>
 
         <section id="tab-saved" class="tab">
